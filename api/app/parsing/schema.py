@@ -51,6 +51,7 @@ RECORD_COLUMNS: dict[str, str] = {
 # Substring rules checked in order against the lower-cased source type, so "Trail Running",
 # "VirtualRide", and FIT "running" all land in the right bucket.
 _TYPE_RULES = (
+    ("motor", "other"),  # before "cycl": Motorcycling is not a ride
     ("strength", "strength"),
     ("weight", "strength"),
     ("run", "run"),

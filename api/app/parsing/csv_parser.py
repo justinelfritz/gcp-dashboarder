@@ -239,6 +239,9 @@ def _text(value) -> str | None:
     if value is None:
         return None
     value = str(value).strip()
+    # Garmin writes some negatives as "'-12" so spreadsheets don't read them as formulas.
+    if value.startswith("'") and value[1:2] in ("-", "+", "="):
+        value = value[1:]
     return None if value.lower() in MISSING else value
 
 

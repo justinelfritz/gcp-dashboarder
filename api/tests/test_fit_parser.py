@@ -106,3 +106,19 @@ def test_gzip_bomb_guard():
     bomb = gzip.compress(b"\x00" * 10_000)
     with pytest.raises(ValueError, match="exceeds"):
         gunzip_capped(bomb, limit=1_000)
+
+
+def test_moving_time_excludes_stops():
+    b = FitBuilder()
+    add_records(b, RUN_START, 31, speed=3.0)  # 30 s moving
+    add_records(b, RUN_START + timedelta(seconds=31), 20, speed=0.0)  # standing at a light
+    add_session(b, RUN_START, 51, "running")
+    [a] = parse_fit(b.build(), "stop.fit").activities
+    assert a["duration_s"] == 51
+    assert a["moving_time_s"] == 30
+
+
+def test_moving_time_without_speed_falls_back_to_timer():
+    b = FitBuilder()
+    add_session(b, RUN_START, 1800, "training", sub_sport="strength_training")
+    assert parse_fit(b.build(), "lift.fit").activities[0]["moving_time_s"] == 1800

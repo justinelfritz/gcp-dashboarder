@@ -34,3 +34,20 @@
   send large batches as several requests.
 - **FIT test fixtures are generated** by `api/tests/fit_builder.py` and checked by decoding with the
   official SDK. They still need validating against real device files.
+
+## 2026-10-25: Validated against real Garmin exports
+
+Checked against a real Garmin Connect CSV (140 activities) and 5 FIT files from the same account
+(run, trail run, gravel ride, hike, strength). Tests in `api/tests/test_private_fixtures.py` run
+when files are present in the git-ignored `api/tests/fixtures/private/`.
+
+- **Garmin CSV units follow the account's display setting** (imperial: miles, feet), but some
+  columns stay metric regardless (e.g. Avg Stride Length in meters). Confirmed by matching CSV
+  rows to FIT files. The upload's `units` must match the Garmin account setting.
+- **FIT moving time is derived from records** (speed > 0.3 m/s, gaps over 30 s ignored, capped at
+  timer time). This matches Garmin Connect's Moving Time to the second for runs and hikes and
+  within 0.2% for rides. Without speed data (strength, yoga) it uses the session's
+  `active_time`, which matches Garmin for strength. Timer time is not moving time: it includes
+  stops while the timer runs.
+- **Motorized activities** (Motorcycling) map to `other`, not `ride`.
+- Garmin prefixes some negative numbers with an apostrophe (`'-12`); the CSV parser strips it.

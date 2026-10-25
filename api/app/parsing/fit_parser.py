@@ -2,6 +2,7 @@
 
 import zlib
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 
 from garmin_fit_sdk import Decoder, Stream
 
@@ -16,11 +17,14 @@ FIT_EPOCH = datetime(1989, 12, 31, tzinfo=UTC)
 GZIP_MAGIC = b"\x1f\x8b"
 MAX_DECOMPRESSED_BYTES = 200 * 1024 * 1024
 SEMICIRCLE_TO_DEG = 180 / 2**31
+# Matches Garmin Connect's "Moving Time" to the second on real run and hike files.
+MOVING_SPEED_MPS = 0.3
+# Longer gaps between records mean the device was paused, not moving.
+MAX_RECORD_GAP_S = 30
 
 # FIT session field -> normalized column
 SESSION_FIELDS = {
     "total_elapsed_time": "duration_s",
-    "total_timer_time": "moving_time_s",
     "total_distance": "distance_m",
     "total_ascent": "elevation_gain_m",
     "avg_heart_rate": "avg_hr",
@@ -95,6 +99,9 @@ def parse_fit(data: bytes, source_file: str) -> ParseResult:
         rows = [_record_row(r, activity["activity_id"], start) for r in in_window]
         rows = [r for r in rows if r is not None]
         activity["has_records"] = bool(rows)
+        activity["moving_time_s"] = _moving_time(
+            rows, _num(session.get("total_timer_time")), _num(session.get("active_time"))
+        )
         if rows:
             result.records[activity["activity_id"]] = rows
         result.activities.append(activity)
@@ -179,6 +186,24 @@ def _tz_offset_min(activity_mesgs: list[dict]) -> int | None:
             if -14 * 60 <= offset <= 14 * 60:
                 return offset
     return None
+
+
+def _moving_time(rows: list[dict], timer: float | None, active: float | None) -> float | None:
+    """Seconds spent above walking-still speed, capped at timer time.
+
+    Activities without speed data (strength, yoga) use the device's active time if it wrote one.
+    """
+    moving, has_speed = 0.0, False
+    for prev, cur in pairwise(rows):
+        if cur["speed"] is None:
+            continue
+        has_speed = True
+        gap = (cur["timestamp"] - prev["timestamp"]).total_seconds()
+        if cur["speed"] > MOVING_SPEED_MPS and gap <= MAX_RECORD_GAP_S:
+            moving += gap
+    if not has_speed:
+        return active if active is not None else timer
+    return min(moving, timer) if timer is not None else moving
 
 
 def _num(value) -> float | int | None:

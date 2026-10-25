@@ -102,3 +102,21 @@ def test_unrecognized_csv():
 def test_binary_csv_rejected():
     result = parse_csv(b"PK\x03\x04\x00\x00binary", "x.csv")
     assert "binary" in result.rejected[0].reason
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("Motorcycling", "other"), ("Gravel/Unpaved Cycling", "ride"), ("Treadmill Running", "run"),
+     ("Hiking", "walk"), ("Yoga", "other"), ("VirtualRide", "ride")],
+)
+def test_activity_type_mapping(raw, expected):
+    from app.parsing.schema import normalize_activity_type
+
+    assert normalize_activity_type(raw) == expected
+
+
+def test_garmin_apostrophe_prefixed_numbers():
+    from app.parsing.csv_parser import _number
+
+    assert _number("'-12") == -12
+    assert _number("1,045") == 1045
