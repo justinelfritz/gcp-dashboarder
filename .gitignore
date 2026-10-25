@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+
+# Local session storage (dev API without a GCS bucket)
+.data/
+
+# Real activity files for local testing only: they contain GPS tracks.
+api/tests/fixtures/private/
+
+# Node
+node_modules/
+web/dist/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# OS / editor / logs
+.DS_Store
+.idea/
+*.log
