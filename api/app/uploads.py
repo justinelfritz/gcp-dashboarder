@@ -75,10 +75,16 @@ def process_upload(
     all_rows = [a for _, r in parsed for a in r.activities]
     outcome = store.merge_activities(all_rows) if all_rows else None
 
+    # Only activities whose row came from this upload get their detail data saved; a duplicate
+    # of an activity already stored keeps the stored version's records and laps.
+    winners = outcome.added if outcome else set()
+    store.save_laps({
+        aid: rows for _, r in parsed for aid, rows in r.laps.items() if aid in winners
+    })
     reports = []
     for f, result in parsed:
         for activity_id, rows in result.records.items():
-            if outcome and activity_id in outcome.added:
+            if activity_id in winners:
                 store.save_records(activity_id, rows)
         ids = [a["activity_id"] for a in result.activities]
         added = sum(1 for i in ids if outcome and i in outcome.added and i not in outcome.matched)

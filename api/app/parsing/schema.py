@@ -1,6 +1,7 @@
 """Normalized activity and record schemas shared by all parsers.
 
 Units are metric throughout: meters, seconds, watts, meters per second. Times are UTC.
+Cadence is steps per minute for runs and hikes and revolutions per minute for rides.
 """
 
 import hashlib
@@ -9,7 +10,11 @@ from datetime import datetime
 
 import pandas as pd
 
-ACTIVITY_TYPES = ("run", "ride", "swim", "strength", "walk", "other")
+ACTIVITY_TYPES = ("run", "ride", "hike", "walk", "swim", "strength", "other")
+# Types the app analyzes. Others are stored, so they can be supported later, but hidden.
+VISIBLE_TYPES = ("run", "ride", "hike")
+# Foot sports record cadence per leg; we report steps per minute (both legs).
+FOOT_TYPES = ("run", "hike", "walk")
 
 # Column name -> pandas dtype. Extra columns prefixed `raw_` are allowed and stored as strings.
 ACTIVITY_COLUMNS: dict[str, str] = {
@@ -31,7 +36,10 @@ ACTIVITY_COLUMNS: dict[str, str] = {
     "normalized_power_w": "Float64",
     "avg_speed_mps": "Float64",
     "calories": "Float64",
+    "avg_cadence": "Float64",
+    "is_indoor": "boolean",  # treadmill, trainer, virtual: hidden for now
     "has_records": "boolean",
+    "record_fields": "string",  # comma-separated record columns with data, for the field catalog
 }
 
 RECORD_COLUMNS: dict[str, str] = {
@@ -41,11 +49,31 @@ RECORD_COLUMNS: dict[str, str] = {
     "distance_m": "Float64",
     "hr": "Int32",
     "power": "Float64",
-    "cadence": "Int32",
+    "cadence": "Float64",
     "speed": "Float64",
     "altitude": "Float64",
     "lat": "Float64",
     "lon": "Float64",
+}
+
+# Device laps and computed splits share one table, told apart by `kind`. All metrics are computed
+# from records the same way, so device laps and splits are comparable.
+LAP_KINDS = ("device", "split_km", "split_mi")
+LAP_COLUMNS: dict[str, str] = {
+    "activity_id": "string",
+    "kind": "string",
+    "lap_index": "Int32",  # 1-based
+    "start_time": "datetime64[us, UTC]",
+    "distance_m": "Float64",
+    "duration_s": "Float64",
+    "moving_time_s": "Float64",
+    "avg_speed_mps": "Float64",  # distance / moving time
+    "avg_hr": "Float64",
+    "max_hr": "Float64",
+    "avg_cadence": "Float64",
+    "avg_power_w": "Float64",
+    "elevation_gain_m": "Float64",
+    "is_partial": "boolean",  # the final, shorter split of an activity
 }
 
 # Substring rules checked in order against the lower-cased source type, so "Trail Running",
@@ -59,9 +87,10 @@ _TYPE_RULES = (
     ("cycl", "ride"),
     ("bik", "ride"),
     ("swim", "swim"),
+    ("hik", "hike"),
     ("walk", "walk"),
-    ("hik", "walk"),
 )
+_INDOOR_WORDS = ("treadmill", "indoor", "virtual", "trainer", "spin")
 
 
 def normalize_activity_type(raw: str | None) -> str:
@@ -72,6 +101,11 @@ def normalize_activity_type(raw: str | None) -> str:
         if needle in lowered:
             return kind
     return "other"
+
+
+def is_indoor_type(raw: str | None) -> bool:
+    lowered = (raw or "").lower()
+    return any(word in lowered for word in _INDOOR_WORDS)
 
 
 def make_activity_id(source_format: str, start_time: datetime, activity_type: str) -> str:
@@ -92,6 +126,8 @@ class ParseResult:
     activities: list[dict] = field(default_factory=list)
     # activity_id -> record rows for that activity
     records: dict[str, list[dict]] = field(default_factory=dict)
+    # activity_id -> lap rows (device laps and computed splits)
+    laps: dict[str, list[dict]] = field(default_factory=dict)
     rejected: list[RowError] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -120,3 +156,9 @@ def records_frame(rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     _coerce(df, RECORD_COLUMNS)
     return df[list(RECORD_COLUMNS)]
+
+
+def laps_frame(rows: list[dict]) -> pd.DataFrame:
+    df = pd.DataFrame(rows)
+    _coerce(df, LAP_COLUMNS)
+    return df[list(LAP_COLUMNS)]

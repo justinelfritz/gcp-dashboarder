@@ -54,6 +54,15 @@ MESSAGES = {
         "speed": (6, UINT16, 1000, 0),
         "power": (7, UINT16, 1, 0),
     }),
+    "lap": (19, {
+        "timestamp": (253, UINT32, 1, 0),
+        "start_time": (2, UINT32, 1, 0),
+        "total_elapsed_time": (7, UINT32, 1000, 0),
+        "total_timer_time": (8, UINT32, 1000, 0),
+        "total_distance": (9, UINT32, 100, 0),
+        "total_ascent": (21, UINT16, 1, 0),
+        "lap_trigger": (24, ENUM, 1, 0),
+    }),
     "activity": (34, {
         "timestamp": (253, UINT32, 1, 0),
         "total_timer_time": (0, UINT32, 1000, 0),
@@ -64,7 +73,9 @@ MESSAGES = {
 }
 
 SPORTS = {"generic": 0, "running": 1, "cycling": 2, "swimming": 5, "training": 10}
-SUB_SPORTS = {"generic": 0, "strength_training": 20}
+SUB_SPORTS = {"generic": 0, "treadmill": 1, "trail": 3, "indoor_cycling": 6,
+              "strength_training": 20}
+LAP_TRIGGERS = {"manual": 0, "distance": 2, "session_end": 7}
 
 
 def fit_time(dt: datetime) -> int:
@@ -116,6 +127,8 @@ class FitBuilder:
                 raw = SPORTS[v]
             elif n == "sub_sport":
                 raw = SUB_SPORTS[v]
+            elif n == "lap_trigger":
+                raw = LAP_TRIGGERS[v]
             else:
                 raw = round((v + offset) * scale)
             self._body += struct.pack("<" + fmt, raw)

@@ -1,0 +1,99 @@
+# Panel queries
+
+`POST /sessions/{id}/query` takes a display's filters and a batch of panel definitions and
+returns plot-ready series for each panel. All values are metric (m, s, m/s, s/km, W); the
+frontend converts units for display.
+
+## Request
+
+```json
+{
+  "filters": {
+    "activity_types": ["run"],
+    "date_range": { "last_days": 60 },
+    "filters": []
+  },
+  "distance_tolerance": 0.025,
+  "panels": [ ... ]
+}
+```
+
+`date_range` takes `last_days`, or `start`/`end` as local dates (inclusive).
+`activity_ids` limits the display to those activities; `exclude_activity_ids` leaves those out.
+Both apply after the sport and date filters.
+
+## Panel
+
+| Key | Values | Default |
+|---|---|---|
+| `group_by` | `activity` (a point per activity), `week`, `month` (Monday-start, local time), `point` (a point per lap or record) | `activity` |
+| `x`, `y` | `{ "field", "level": "activity" \| "lap" \| "record", "agg" }` | x = activity `start_time` |
+| `agg` | `mean`, `median`, `min`, `max`, `sum`, `count`, `std`: combines lower-level rows into a point | `mean` |
+| `error` | `none`, `std`, `sem`: spread of the rows behind each y value | `none` |
+| `lap_kind` | `device`, `split_km`, `split_mi` | `device` |
+| `include_partial_laps` | include the shorter final lap/split | `false` |
+| `filters` | activity-level conditions for the whole panel | `[]` |
+| `series` | `[{ "label", "color", "filters" }]`, one plotted series each | one series, "All" |
+
+Filters: `{ "field", "op", "value", "tolerance"? }` with `op` one of `eq`, `neq`, `in`,
+`between` (`[lo, hi]`), `gte`, `lte`, `near` (value ± tolerance; tolerance defaults to the
+request's `distance_tolerance`).
+
+`GET /sessions/{id}/fields?activity_type=run` lists every field per level, with units and how
+many of the selected activities have data for it.
+
+## Examples
+
+Average lap pace per run with standard-deviation error bars:
+
+```json
+{ "id": "lap-pace", "y": { "field": "avg_pace_s_per_km", "level": "lap" }, "error": "std" }
+```
+
+Average speed ± std from per-second data, 5k runs vs 10k runs as two colored series:
+
+```json
+{
+  "id": "speed-by-distance",
+  "y": { "field": "speed", "level": "record" },
+  "error": "std",
+  "series": [
+    { "label": "5k", "color": "#1f77b4",
+      "filters": [{ "field": "distance_m", "op": "near", "value": 5000 }] },
+    { "label": "10k", "color": "#ff7f0e",
+      "filters": [{ "field": "distance_m", "op": "near", "value": 10000 }] }
+  ]
+}
+```
+
+Runs and rides as separate series:
+
+```json
+{
+  "id": "speed-by-sport",
+  "y": { "field": "avg_speed_mps" },
+  "series": [
+    { "label": "Runs", "filters": [{ "field": "activity_type", "op": "eq", "value": "run" }] },
+    { "label": "Rides", "filters": [{ "field": "activity_type", "op": "eq", "value": "ride" }] }
+  ]
+}
+```
+
+Pace against cadence, one point per run:
+
+```json
+{ "id": "pace-vs-cadence", "x": { "field": "avg_cadence" }, "y": { "field": "avg_pace_s_per_km" } }
+```
+
+Weekly distance:
+
+```json
+{ "id": "weekly", "group_by": "week", "y": { "field": "distance_m", "agg": "sum" } }
+```
+
+## Response
+
+Each panel returns `x`/`y` axis info (label, unit), `series` of `points`
+(`{ x, y, error, n, activity_id }`, sorted by x; dates are the activity's local time, without an
+offset), `warnings` (e.g. activities without lap data),
+and `error` if the panel definition is invalid. One bad panel never fails the batch.

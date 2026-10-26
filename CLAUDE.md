@@ -25,3 +25,6 @@ The full plan is in `dashboarder-plan.md`; architecture decisions are logged in 
 - Never log uploaded file contents. Log session ID, file size, and parse counts only.
 - Keep the dashboard JSON `schema_version` in sync with the frontend types.
 - Keep `web/src/api/client.ts` types in sync with `api/app/models.py`.
+- Panel query format: `docs/panel-queries.md`. Chart rendering is a pure function
+  (`web/src/charts/buildFigure.ts`); test figures there rather than through Plotly.
+- Chart colors come from the validated palette in `web/src/charts/palette.ts`; don't add hues.

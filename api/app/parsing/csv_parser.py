@@ -17,8 +17,10 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from app.parsing.schema import (
+    FOOT_TYPES,
     ParseResult,
     RowError,
+    is_indoor_type,
     make_activity_id,
     normalize_activity_type,
 )
@@ -33,7 +35,8 @@ MISSING = {"", "--", "n/a", "na", "null", "none"}
 # Source columns each profile maps to normalized fields; the rest are kept as raw_ columns.
 GARMIN_MAPPED = frozenset({
     "Activity Type", "Date", "Title", "Distance", "Calories", "Time", "Moving Time",
-    "Elapsed Time", "Avg HR", "Max HR", "Total Ascent", "Avg Power",
+    "Elapsed Time", "Avg HR", "Max HR", "Total Ascent", "Avg Power", "Avg Run Cadence",
+    "Avg Bike Cadence",
 })
 STRAVA_MAPPED = frozenset({
     "Activity Date", "Activity Name", "Activity Type", "Elapsed Time", "Elapsed Time.1",
@@ -140,6 +143,10 @@ def _parse_garmin(df: pd.DataFrame, source_file: str, timezone: str | None, unit
                 normalized_power_w=_positive(row.get(np_cols[0])) if np_cols else None,
                 calories=_number(row.get("Calories")),
                 avg_speed_mps=_speed(distance, moving or elapsed),
+                # Garmin's CSV already reports run cadence in steps per minute.
+                avg_cadence=_positive(row.get(
+                    "Avg Run Cadence" if activity_type in FOOT_TYPES else "Avg Bike Cadence"
+                )),
             )
             activity.update(_raw_columns(row, GARMIN_MAPPED | set(np_cols)))
             result.activities.append(activity)
@@ -205,6 +212,7 @@ def _base(source_file, source_format, start, activity_type, raw_type, row) -> di
         "tz_offset_min": None,
         "activity_type": activity_type,
         "raw_activity_type": raw_type,
+        "is_indoor": is_indoor_type(raw_type),
         "has_records": False,
     }
 

@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     local_storage_dir: str = ".data"
     # Cloud Run caps HTTP/1 request bodies at 32 MiB, so a single file must stay below that.
     max_file_bytes: int = 25 * 1024 * 1024
-    max_files_per_session: int = 500
+    # Garmin full exports hold one FIT file per activity, so years of history means thousands.
+    max_files_per_session: int = 5000
 
     @property
     def cors_origin_list(self) -> list[str]:

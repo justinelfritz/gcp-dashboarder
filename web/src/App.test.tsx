@@ -16,7 +16,9 @@ describe('App', () => {
     mockFetch((url) =>
       url.endsWith('/healthz')
         ? Response.json({ status: 'ok' })
-        : Response.json({ session_id: 'abcdefgh12345678' }, { status: 201 }),
+        : url.includes('/activities')
+          ? Response.json({ total: 0, items: [] })
+          : Response.json({ session_id: 'abcdefgh12345678' }, { status: 201 }),
     )
     render(<App />)
     expect(await screen.findByText('API connected')).toBeInTheDocument()

@@ -67,6 +67,7 @@ def test_every_fit_file_matches_a_csv_row(csv_activities, fit_activities):
         ("avg_hr", 0.0, 1),
         ("calories", 0.0, 1),
         ("tz_offset_min", 0.0, 0),
+        ("avg_cadence", 0.0, 1.5),
     ],
 )
 def test_csv_values_agree_with_fit(csv_activities, fit_activities, field, rel_tol, abs_tol):
@@ -83,3 +84,33 @@ def test_merge_collapses_fit_into_csv(csv_activities, fit_activities):
     rows, outcome = merge_rows(csv_activities, fit_activities)
     assert len(rows) == len(csv_activities)
     assert len(outcome.matched) == len(fit_activities)
+
+
+def test_computed_laps_match_device_laps():
+    """Laps are recomputed from records; they must agree with the watch's own lap summaries."""
+    from garmin_fit_sdk import Decoder, Stream
+
+    from app.parsing.schema import FOOT_TYPES
+
+    for f in fit_files:
+        data = f.read_bytes()
+        result = parse_fit(data, f.name)
+        [activity] = result.activities
+        if activity["activity_type"] not in ("run", "ride", "hike"):
+            continue
+        messages, _ = Decoder(Stream.from_byte_array(bytearray(data))).read()
+        laps = result.laps[activity["activity_id"]]
+        device = [lap for lap in laps if lap["kind"] == "device"]
+        assert len(device) == len(messages["lap_mesgs"]), f.name
+        for ours, mesg in zip(device, messages["lap_mesgs"], strict=True):
+            assert ours["distance_m"] == pytest.approx(mesg["total_distance"], abs=5), f.name
+            assert ours["avg_hr"] == pytest.approx(mesg["avg_heart_rate"], abs=1.5), f.name
+            if mesg.get("avg_cadence") and activity["activity_type"] in FOOT_TYPES:
+                spm = (mesg["avg_cadence"] + (mesg.get("avg_fractional_cadence") or 0)) * 2
+                assert ours["avg_cadence"] == pytest.approx(spm, abs=1.5), f.name
+        for kind in ("device", "split_km", "split_mi"):
+            rows = [lap for lap in laps if lap["kind"] == kind]
+            total = sum(lap["distance_m"] for lap in rows)
+            assert total == pytest.approx(activity["distance_m"], abs=5), (f.name, kind)
+            ascent = sum(lap["elevation_gain_m"] or 0 for lap in rows)
+            assert ascent == pytest.approx(activity["elevation_gain_m"] or 0, abs=2), (f.name, kind)

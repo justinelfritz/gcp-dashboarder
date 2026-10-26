@@ -107,7 +107,7 @@ def test_binary_csv_rejected():
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [("Motorcycling", "other"), ("Gravel/Unpaved Cycling", "ride"), ("Treadmill Running", "run"),
-     ("Hiking", "walk"), ("Yoga", "other"), ("VirtualRide", "ride")],
+     ("Hiking", "hike"), ("Walking", "walk"), ("Yoga", "other"), ("VirtualRide", "ride")],
 )
 def test_activity_type_mapping(raw, expected):
     from app.parsing.schema import normalize_activity_type

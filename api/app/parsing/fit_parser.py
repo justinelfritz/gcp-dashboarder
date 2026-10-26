@@ -1,14 +1,16 @@
-"""Parse Garmin FIT activity files (plain or gzipped) into normalized activities and records."""
+"""Parse Garmin FIT activity files (plain or gzipped) into activities, records, and laps."""
 
 import zlib
 from datetime import UTC, datetime, timedelta
-from itertools import pairwise
 
 from garmin_fit_sdk import Decoder, Stream
 
+from app.parsing import segments
 from app.parsing.schema import (
+    FOOT_TYPES,
     ParseResult,
     RowError,
+    is_indoor_type,
     make_activity_id,
     normalize_activity_type,
 )
@@ -17,10 +19,7 @@ FIT_EPOCH = datetime(1989, 12, 31, tzinfo=UTC)
 GZIP_MAGIC = b"\x1f\x8b"
 MAX_DECOMPRESSED_BYTES = 200 * 1024 * 1024
 SEMICIRCLE_TO_DEG = 180 / 2**31
-# Matches Garmin Connect's "Moving Time" to the second on real run and hike files.
-MOVING_SPEED_MPS = 0.3
-# Longer gaps between records mean the device was paused, not moving.
-MAX_RECORD_GAP_S = 30
+RECORD_DATA_FIELDS = ("hr", "power", "cadence", "speed", "altitude", "lat")
 
 # FIT session field -> normalized column
 SESSION_FIELDS = {
@@ -37,6 +36,7 @@ SESSION_FIELDS = {
 SESSION_SKIP = {
     "timestamp", "start_time", "sport", "sub_sport", "avg_speed", "enhanced_avg_speed",
     "message_index", "event", "event_type", "trigger", "first_lap_index", "num_laps",
+    "avg_cadence", "avg_fractional_cadence",
 }
 
 
@@ -85,6 +85,7 @@ def parse_fit(data: bytes, source_file: str) -> ParseResult:
         result.warnings.append("no session summary in file; summary derived from records")
         sessions = [_session_from_records(records, messages.get("sport_mesgs", []))]
 
+    laps = messages.get("lap_mesgs", [])
     for i, session in enumerate(sessions):
         start = session.get("start_time")
         if not isinstance(start, datetime):
@@ -92,26 +93,44 @@ def parse_fit(data: bytes, source_file: str) -> ParseResult:
             continue
         activity = _activity_from_session(session, source_file, offset_min)
         end = start + timedelta(seconds=activity.get("duration_s") or 0)
-        # Multisport files hold several sessions; give each one the records in its time window.
-        in_window = records if len(sessions) == 1 else [
-            r for r in records if start <= r.get("timestamp", start) <= end
-        ]
-        rows = [_record_row(r, activity["activity_id"], start) for r in in_window]
+        multi = len(sessions) > 1
+        foot = activity["activity_type"] in FOOT_TYPES
+        rows = [_record_row(r, activity["activity_id"], start, foot)
+                for r in _in_window(records, "timestamp", start, end, multi)]
         rows = [r for r in rows if r is not None]
+        df = segments.prepare(rows)
         activity["has_records"] = bool(rows)
-        activity["moving_time_s"] = _moving_time(
-            rows, _num(session.get("total_timer_time")), _num(session.get("active_time"))
+        activity["record_fields"] = ",".join(
+            f for f in RECORD_DATA_FIELDS if rows and df[f].notna().any()
+        ) if rows else None
+        activity["moving_time_s"] = segments.moving_time(
+            df, _num(session.get("total_timer_time")), _num(session.get("active_time"))
         )
         if rows:
-            result.records[activity["activity_id"]] = rows
+            aid = activity["activity_id"]
+            result.records[aid] = rows
+            lap_rows = segments.device_laps(
+                _in_window(laps, "start_time", start, end, multi), df, aid
+            )
+            lap_rows += segments.computed_splits(df, aid, activity["elevation_gain_m"])
+            if lap_rows:
+                result.laps[aid] = lap_rows
         result.activities.append(activity)
     return result
+
+
+def _in_window(mesgs: list[dict], key: str, start, end, multi: bool) -> list[dict]:
+    """Multisport files hold several sessions; each gets the messages in its time window."""
+    if not multi:
+        return mesgs
+    return [m for m in mesgs if start <= m.get(key, start) <= end]
 
 
 def _activity_from_session(session: dict, source_file: str, offset_min: int | None) -> dict:
     sport = str(session.get("sport", "generic"))
     sub_sport = str(session.get("sub_sport", "generic"))
     activity_type = normalize_activity_type(f"{sub_sport} {sport}")
+    raw_type = sport if sub_sport == "generic" else f"{sport}/{sub_sport}"
     start = session["start_time"]
 
     activity = {
@@ -121,8 +140,13 @@ def _activity_from_session(session: dict, source_file: str, offset_min: int | No
         "start_time": start,
         "tz_offset_min": offset_min,
         "activity_type": activity_type,
-        "raw_activity_type": sport if sub_sport == "generic" else f"{sport}/{sub_sport}",
+        "raw_activity_type": raw_type,
+        "is_indoor": is_indoor_type(raw_type),
         "avg_speed_mps": _num(session.get("enhanced_avg_speed", session.get("avg_speed"))),
+        "avg_cadence": _cadence(
+            session.get("avg_cadence"), session.get("avg_fractional_cadence"),
+            activity_type in FOOT_TYPES,
+        ),
     }
     for fit_name, col in SESSION_FIELDS.items():
         activity[col] = _num(session.get(fit_name))
@@ -156,7 +180,7 @@ def _session_from_records(records: list[dict], sport_mesgs: list[dict]) -> dict:
     }
 
 
-def _record_row(r: dict, activity_id: str, start: datetime) -> dict | None:
+def _record_row(r: dict, activity_id: str, start: datetime, foot: bool) -> dict | None:
     ts = r.get("timestamp")
     if not isinstance(ts, datetime):
         return None
@@ -168,7 +192,7 @@ def _record_row(r: dict, activity_id: str, start: datetime) -> dict | None:
         "distance_m": _num(r.get("distance")),
         "hr": _num(r.get("heart_rate")),
         "power": _num(r.get("power")),
-        "cadence": _num(r.get("cadence")),
+        "cadence": _cadence(r.get("cadence"), r.get("fractional_cadence"), foot),
         "speed": _num(r.get("enhanced_speed", r.get("speed"))),
         "altitude": _num(r.get("enhanced_altitude", r.get("altitude"))),
         "lat": lat * SEMICIRCLE_TO_DEG if lat is not None else None,
@@ -188,22 +212,13 @@ def _tz_offset_min(activity_mesgs: list[dict]) -> int | None:
     return None
 
 
-def _moving_time(rows: list[dict], timer: float | None, active: float | None) -> float | None:
-    """Seconds spent above walking-still speed, capped at timer time.
-
-    Activities without speed data (strength, yoga) use the device's active time if it wrote one.
-    """
-    moving, has_speed = 0.0, False
-    for prev, cur in pairwise(rows):
-        if cur["speed"] is None:
-            continue
-        has_speed = True
-        gap = (cur["timestamp"] - prev["timestamp"]).total_seconds()
-        if cur["speed"] > MOVING_SPEED_MPS and gap <= MAX_RECORD_GAP_S:
-            moving += gap
-    if not has_speed:
-        return active if active is not None else timer
-    return min(moving, timer) if timer is not None else moving
+def _cadence(whole, fraction, foot: bool) -> float | None:
+    """FIT stores run/walk cadence per leg; report steps per minute (both legs)."""
+    whole = _num(whole)
+    if whole is None:
+        return None
+    total = whole + (_num(fraction) or 0)
+    return total * 2 if foot else total
 
 
 def _num(value) -> float | int | None:

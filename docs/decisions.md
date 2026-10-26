@@ -51,3 +51,77 @@ when files are present in the git-ignored `api/tests/fixtures/private/`.
   stops while the timer runs.
 - **Motorized activities** (Motorcycling) map to `other`, not `ride`.
 - Garmin prefixes some negative numbers with an apostrophe (`'-12`); the CSV parser strips it.
+
+## 2026-10-25: Milestone 3, user-defined panels
+
+Scope and design agreed for custom multi-panel displays. Format reference: `docs/panel-queries.md`.
+
+- **Scope: outdoor runs, rides, and hikes.** Other types (strength, yoga, walks, swims) and
+  indoor activities (treadmill, trainer, virtual) are stored but hidden from every endpoint, so
+  they can be supported later without re-uploading.
+- **Panels are declarative, not named metrics.** Each panel chooses a level (activity, lap,
+  record), fields for x and y, an aggregation, error bars (std or sem), what one point is
+  (activity, week, month, or each row), and series with their own filters. This replaces the
+  plan's metric registry. The engine uses pandas (no SQL is generated from user input).
+- **Distance bins default to ±2.5%** (`near` filter: 5k = 4,875–5,125 m). The request carries
+  the user's `distance_tolerance` setting; a filter can override it.
+- **Laps: device laps and computed splits (per km and per mile)**, in one `laps.parquet` per
+  session. Every lap metric is recomputed from records with the same rules, so the two kinds are
+  comparable; device laps contribute only their boundaries and ascent. Partial final laps are
+  excluded by default. Validated on real files: distance within 2 m, HR within 1 bpm, cadence
+  exact against the watch's lap values.
+- **Record-level speed and pace use moving samples only** (> 0.3 m/s), so stops don't distort
+  means and standard deviations.
+- **Cadence is steps/min for runs and hikes** (FIT stores per-leg cadence; doubled, plus the
+  fractional part) and rpm for rides. Averages are plain means over all samples, which matches
+  Garmin Connect exactly.
+- **Elevation gain follows the device.** Garmin's barometric smoothing can't be reproduced from
+  samples (no single threshold came within 9–32% on all files), so device laps use the watch's
+  lap ascent and computed splits are scaled to sum to the watch's total.
+- **Weeks start Monday in the activity's local time.**
+- **ZIP import happens in the browser** (zip.js). Exports run to several GB (over Cloud Run's
+  32 MiB request limit) and contain sleep, health, profile, and photo data. The browser keeps
+  only `.fit`/`.fit.gz` files and CSVs with an activity-export header, strips the account email
+  from Garmin file names, and uploads in batches of at most 20 MB / 50 files. GPX/TCX are counted
+  and skipped.
+- **Per-session file cap raised to 5,000** (was 500) so multi-year Garmin exports fit.
+
+## 2026-10-25: Milestone 4, dashboard UI
+
+- **Grid:** react-grid-layout 1.5 (12 columns, drag by panel title, resize from the corner). Only
+  the wide layout is saved; under 900 px panels stack in one column. Pinned to 1.5.x and
+  plotly.js 2.35.x, the last releases of the APIs we know; 2.x/3.x+ of each exist and would be a
+  deliberate upgrade. Checked react-grid-layout renders under React 19 without `findDOMNode`.
+- **Charts:** Plotly (basic bundle: scatter and bar, with native error bars), lazy-loaded as its
+  own chunk so the first page load stays small. `web/src/charts/buildFigure.ts` is a pure
+  function from a query result to a figure and a table, unit-tested without a browser.
+- **Visual rules** (from the dataviz guidance): one y axis per panel; a validated 8-color
+  palette assigned by series slot, with separate dark-mode steps; legend only for 2+ series;
+  2 px lines, 8 px markers with a surface ring; hairline grid; pace axes reversed (faster is
+  up) with m:ss ticks; every panel has a table view (needed because three light-mode colors are
+  under 3:1 contrast, and useful for checking numbers against Garmin Connect).
+- **Dates are the activity's local time.** The API returns local wall-clock times for date axes,
+  and the frontend does date math in UTC so the viewer's own timezone never shifts them.
+- **Units:** the API stays metric; `web/src/charts/units.ts` converts for display. Units are a
+  display setting and don't refetch; the distance tolerance is a query setting and does.
+- **Dashboards** (`schema_version: 1`) live in localStorage, several per browser, with JSON
+  export/import. Imported files are validated field by field and IDs are regenerated. Series
+  store a palette slot, not a hex color, so dark mode can swap shades.
+- **Series filters:** a target distance (± tolerance) and an optional sport, so one panel can
+  compare 5k vs 10k runs, or runs vs rides.
+
+## 2026-10-25: Hand-picked activity selection
+
+- Each dashboard can analyze a subset of the activities that match its sports and date range,
+  chosen in an "Activities" picker: checkboxes, name search, a from/to date range that narrows
+  the list for bulk check/uncheck, and shift-click for runs of rows.
+- **Stored as a mode plus IDs** (`filters.selection`): `all` lists the excluded activities, so
+  new uploads are analyzed automatically; `only` lists the included ones, for "just these
+  runs". "Pick individually" starts an empty `only` selection. Everything selected is stored as
+  no selection at all. Sent to the API as `activity_ids` / `exclude_activity_ids`.
+- An optional field, so `schema_version` stays 1: older saved dashboards load unchanged.
+  Activity IDs are per session, so an imported dashboard's selection only matches activities in
+  the session that exported it.
+- `GET /activities` now takes `last_days` and filters through the same code as queries, so the
+  picker lists exactly the activities a dashboard's date preset covers. Its limit rose to 5000
+  (the per-session file cap); the activity-name lookup for chart tooltips was capped at 500.
