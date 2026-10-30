@@ -40,10 +40,10 @@ export default function App() {
   return (
     <>
       <header className="app-header">
-        <h1>Dashboarder</h1>
+        <h1>Custom Dashboarder</h1>
         {sessionId && (
           <nav className="tabs" aria-label="Sections">
-            {(['dashboard', 'data'] as const).map((t) => (
+            {(['data', 'dashboard'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -51,7 +51,7 @@ export default function App() {
                 aria-current={tab === t ? 'page' : undefined}
                 onClick={() => setTab(t)}
               >
-                {t === 'dashboard' ? 'Dashboard' : 'Data'}
+                {t === 'dashboard' ? 'Dashboard' : 'Load Data'}
               </button>
             ))}
           </nav>

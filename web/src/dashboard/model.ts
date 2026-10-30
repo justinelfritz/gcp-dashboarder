@@ -1,5 +1,5 @@
 // Translating dashboard definitions into API queries, plus starter content.
-import type { DateRange, DisplayFilters, PanelQuery, QueryRequest } from '../api/client'
+import type { ActivityType, DateRange, DisplayFilters, PanelQuery, QueryRequest } from '../api/client'
 import { newId, SCHEMA_VERSION } from './types'
 import type { ActivitySelection, Dashboard, DashboardFilters, PanelConfig, Settings } from './types'
 
@@ -113,17 +113,18 @@ export function starterDashboard(): Dashboard {
         lap_kind: 'split_mi',
         y: { field: 'avg_pace_s_per_km', level: 'lap', agg: 'mean' },
         error: 'std',
+        series: [{ label: 'All', color_slot: 0 }],
         layout: { x: 0, y: 0, w: 6, h: 7 },
       },
       {
         ...blankPanel(0),
         id: newId('p'),
-        title: 'Speed: 5k vs 10k runs',
+        title: speedTitle(['run']),
         y: { field: 'speed', level: 'record', agg: 'mean' },
         error: 'std',
         series: [
-          { label: '5k', color_slot: 0, distance_m: 5000 },
-          { label: '10k', color_slot: 1, distance_m: 10000 },
+          { label: '5k', color_slot: 1, distance_m: 5000 },
+          { label: '10k', color_slot: 2, distance_m: 10000 },
         ],
         layout: { x: 6, y: 0, w: 6, h: 7 },
       },
@@ -134,6 +135,7 @@ export function starterDashboard(): Dashboard {
         chart: 'scatter',
         x: { field: 'avg_cadence', level: 'activity' },
         y: { field: 'avg_pace_s_per_km', level: 'activity', agg: 'mean' },
+        series: [{ label: 'All', color_slot: 6 }],
         layout: { x: 0, y: 7, w: 6, h: 7 },
       },
       {
@@ -143,8 +145,45 @@ export function starterDashboard(): Dashboard {
         chart: 'bar',
         group_by: 'week',
         y: { field: 'distance_m', level: 'activity', agg: 'sum' },
+        series: [{ label: 'All', color_slot: 7 }],
         layout: { x: 6, y: 7, w: 6, h: 7 },
       },
     ],
   }
+}
+
+const SPORT_PLURALS: Record<ActivityType, string> = { run: 'runs', ride: 'rides', hike: 'hikes' }
+const SPEED_TITLE = /^Speed: 5k vs 10k (runs|rides|hikes|activities)$/
+
+/** The starter speed panel's title for the selected sports: "runs" for one sport, "activities" for several. */
+export function speedTitle(types: ActivityType[]): string {
+  return `Speed: 5k vs 10k ${types.length === 1 ? SPORT_PLURALS[types[0]] : 'activities'}`
+}
+
+/** Retitles the starter speed panel to match the sports; titles the user has edited are left alone. */
+export function retitleForTypes(panels: PanelConfig[], types: ActivityType[]): PanelConfig[] {
+  return panels.map((p) => (SPEED_TITLE.test(p.title) ? { ...p, title: speedTitle(types) } : p))
+}
+
+/** Colors the starter panels shipped with before each got its own (all slot 0, 5k/10k slots 0/1). */
+const OLD_STARTER_SLOTS: Record<string, number[]> = {
+  'Pace per mile split': [0],
+  'Pace vs cadence': [0],
+  'Weekly distance': [0],
+  speed: [0, 1],
+}
+
+/** Gives saved starter panels the current starter colors, unless the user changed their title or colors. */
+export function upgradeStarterColors(d: Dashboard): Dashboard {
+  const current = new Map(starterDashboard().panels.map((p) => [SPEED_TITLE.test(p.title) ? 'speed' : p.title, p.series]))
+  const panels = d.panels.map((p) => {
+    const key = SPEED_TITLE.test(p.title) ? 'speed' : p.title
+    const old = OLD_STARTER_SLOTS[key]
+    const next = current.get(key)
+    const slots = p.series.map((s) => s.color_slot)
+    if (!old || !next || slots.length !== old.length || slots.some((s, i) => s !== old[i])) return p
+    if (next.every((s, i) => s.color_slot === old[i])) return p
+    return { ...p, series: p.series.map((s, i) => ({ ...s, color_slot: next[i].color_slot })) }
+  })
+  return panels.every((p, i) => p === d.panels[i]) ? d : { ...d, panels }
 }

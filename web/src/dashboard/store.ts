@@ -1,6 +1,6 @@
 // Dashboards and settings, persisted to localStorage, with validated JSON import/export.
 import { useCallback, useEffect, useState } from 'react'
-import { starterDashboard } from './model'
+import { starterDashboard, upgradeStarterColors } from './model'
 import { DEFAULT_SETTINGS, newId, PALETTE_SIZE, SCHEMA_VERSION } from './types'
 import type { ActivitySelection, Dashboard, PanelConfig, SeriesConfig, Settings } from './types'
 
@@ -153,7 +153,7 @@ function loadSaved(): Saved {
   const valid = saved?.dashboards?.filter((d) => d?.schema_version === SCHEMA_VERSION) ?? []
   if (valid.length) {
     const activeId = valid.some((d) => d.id === saved?.activeId) ? saved!.activeId : valid[0].id
-    return { activeId, dashboards: valid }
+    return { activeId, dashboards: valid.map(upgradeStarterColors) }
   }
   const starter = starterDashboard()
   return { activeId: starter.id, dashboards: [starter] }

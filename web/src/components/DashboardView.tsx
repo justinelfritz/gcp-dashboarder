@@ -7,7 +7,7 @@ import type { ActivityType } from '../api/client'
 import type { FigureContext } from '../charts/buildFigure'
 import { currentTheme } from '../charts/palette'
 import { activityLabel, useActivities, useFieldCatalog, usePanelResults } from '../dashboard/hooks'
-import { blankPanel, isSelected, starterDashboard } from '../dashboard/model'
+import { blankPanel, isSelected, retitleForTypes, starterDashboard } from '../dashboard/model'
 import { DashboardImportError, exportDashboard, parseDashboard } from '../dashboard/store'
 import type { useDashboards } from '../dashboard/store'
 import { newId, SCHEMA_VERSION } from '../dashboard/types'
@@ -148,7 +148,12 @@ export default function DashboardView({ sessionId, store, settings, onSettings, 
                 const types = e.target.checked
                   ? [...dashboard.filters.activity_types, t.value]
                   : dashboard.filters.activity_types.filter((x) => x !== t.value)
-                if (types.length) setFilters({ activity_types: types })
+                if (types.length) {
+                  update({
+                    filters: { ...dashboard.filters, activity_types: types },
+                    panels: retitleForTypes(dashboard.panels, types),
+                  })
+                }
               }}
             />
             {t.label}

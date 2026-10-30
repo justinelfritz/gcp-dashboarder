@@ -98,8 +98,13 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
 - **Visual rules** (from the dataviz guidance): one y axis per panel; a validated 8-color
   palette assigned by series slot, with separate dark-mode steps; legend only for 2+ series;
   2 px lines, 8 px markers with a surface ring; hairline grid; pace axes reversed (faster is
-  up) with m:ss ticks; every panel has a table view (needed because three light-mode colors are
-  under 3:1 contrast, and useful for checking numbers against Garmin Connect).
+  up) with m:ss ticks; every panel has a table view (useful for checking numbers against Garmin
+  Connect, and for readers who can't rely on color).
+- **Palette contrast in both modes.** The reference palette's light aqua, yellow and magenta
+  were under 3:1 on the light surface. They are replaced by darker steps of the same hues
+  (`#01a773`, `#bd7f03`, `#da6f98`), found by searching OKLCH lightness for the set that keeps
+  the validator's gates: every slot is now >= 3:1 in both modes, worst adjacent CVD ΔE 10.0 and
+  normal-vision 17.6 in light, and the first three slots still pass all-pairs for scatter.
 - **Dates are the activity's local time.** The API returns local wall-clock times for date axes,
   and the frontend does date math in UTC so the viewer's own timezone never shifts them.
 - **Units:** the API stays metric; `web/src/charts/units.ts` converts for display. Units are a

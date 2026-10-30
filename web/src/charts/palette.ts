@@ -1,7 +1,8 @@
 // Validated categorical palette (8 slots, fixed order) and chart chrome, light and dark.
 // Validated with the dataviz skill's validate_palette.js: all hard gates pass in both modes on
-// adjacent pairs; the first three slots also pass all-pairs (scatter). Light slots 3-5 are below
-// 3:1 contrast on the surface, so every panel offers a table view.
+// adjacent pairs; the first three slots also pass all-pairs (scatter). Every slot clears 3:1
+// contrast on its mode's surface: light slots 3-5 (aqua, yellow, magenta) are darker steps of the
+// reference hues, chosen so the light set keeps worst adjacent CVD ΔE 10.0 / normal-vision 17.6.
 
 export interface ChartTheme {
   surface: string
@@ -20,7 +21,7 @@ export const LIGHT: ChartTheme = {
   muted: '#898781',
   grid: '#e1e0d9',
   baseline: '#c3c2b7',
-  series: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
+  series: ['#2a78d6', '#eb6834', '#01a773', '#bd7f03', '#da6f98', '#008300', '#6250d6', '#e34948'],
 }
 
 export const DARK: ChartTheme = {
