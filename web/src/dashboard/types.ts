@@ -34,7 +34,16 @@ export interface SeriesConfig {
   distance_m?: number | null
   /** Limit this series to one sport, e.g. runs vs rides on one panel. */
   activity_type?: ActivityType | null
+  /** Palette slot for this series' right-axis line; absent picks a slot the left series don't use. */
+  y2_color_slot?: number | null
 }
+
+export type LineStyle = 'dash' | 'dot' | 'solid'
+export const LINE_STYLES: { value: LineStyle; label: string; hint: string }[] = [
+  { value: 'dash', label: 'Dashed', hint: '- -' },
+  { value: 'dot', label: 'Dotted', hint: '···' },
+  { value: 'solid', label: 'Solid', hint: '—' },
+]
 
 export interface PanelLayout {
   x: number
@@ -52,6 +61,14 @@ export interface PanelConfig {
   include_partial_laps: boolean
   x: AxisSpec
   y: AxisSpec
+  /** Draw a least-squares trendline per series for y. */
+  trend?: boolean
+  /** Optional second quantity on a right-hand axis; shares x, grouping, laps, and series with y. */
+  y2?: AxisSpec | null
+  /** Line style of the right-axis quantity; dashed when absent. */
+  y2_line?: LineStyle
+  /** Draw a least-squares trendline per series for y2. */
+  y2_trend?: boolean
   error: NonNullable<PanelQuery['error']>
   series: SeriesConfig[]
   layout: PanelLayout

@@ -112,6 +112,29 @@ describe('DashboardView', () => {
     })
   })
 
+  it('adds a right-axis quantity, fetched in the same request', async () => {
+    render(<Harness />)
+    await screen.findAllByTestId('chart')
+    const panel = screen.getByRole('heading', { name: 'Weekly distance' }).closest('article')!
+    fireEvent.click(within(panel).getByText('Edit'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByLabelText('Plot a second quantity'))
+    fireEvent.change(await within(dialog).findByLabelText('Right axis field'), { target: { value: 'avg_hr' } })
+    fireEvent.change(within(dialog).getByLabelText('Right axis line style'), { target: { value: 'dot' } })
+    const colors = within(dialog).getByRole('radiogroup', { name: 'Right axis color for All' })
+    fireEvent.click(within(colors).getByRole('radio', { name: 'Color 3' }))
+    expect(within(colors).getByRole('radio', { name: 'Color 3' })).toHaveAttribute('aria-checked', 'true')
+    fireEvent.click(within(dialog).getByText('Save'))
+
+    await waitFor(() => {
+      const last = query.mock.calls[query.mock.calls.length - 1][1] as QueryRequest
+      const companion = last.panels.find((p) => p.id.endsWith('~y2'))
+      expect(companion?.y).toMatchObject({ field: 'avg_hr', level: 'activity' })
+      expect(companion?.group_by).toBe('week')
+    })
+    expect(within(panel).getByTestId('chart')).toBeInTheDocument()
+  })
+
   it('refetches for a new distance tolerance but not for a units change', async () => {
     render(<Harness />)
     await screen.findAllByTestId('chart')

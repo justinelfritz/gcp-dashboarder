@@ -95,7 +95,8 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
 - **Charts:** Plotly (basic bundle: scatter and bar, with native error bars), lazy-loaded as its
   own chunk so the first page load stays small. `web/src/charts/buildFigure.ts` is a pure
   function from a query result to a figure and a table, unit-tested without a browser.
-- **Visual rules** (from the dataviz guidance): one y axis per panel; a validated 8-color
+- **Visual rules** (from the dataviz guidance): one y axis per panel (since relaxed, see
+  2026-10-30); a validated 8-color
   palette assigned by series slot, with separate dark-mode steps; legend only for 2+ series;
   2 px lines, 8 px markers with a surface ring; hairline grid; pace axes reversed (faster is
   up) with m:ss ticks; every panel has a table view (useful for checking numbers against Garmin
@@ -130,3 +131,41 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
 - `GET /activities` now takes `last_days` and filters through the same code as queries, so the
   picker lists exactly the activities a dashboard's date preset covers. Its limit rose to 5000
   (the per-session file cap); the activity-name lookup for chart tooltips was capped at 500.
+
+## 2026-10-30: Optional right-hand y axis
+
+- A panel can plot a second quantity (`y2`) on a right-hand axis, sharing x, grouping, laps,
+  filters, and series with the first. This reverses the one-axis rule above at the user's
+  request. Comparing, say, pace and heart rate on one plot was worth more to them than the cost:
+  the two scales are arbitrary relative to each other, so line heights, slopes, and crossings
+  can't be compared across axes. The editor says so under the control.
+- Mitigations, so a reader can always tell which line reads against which axis:
+  - right-axis traces default to palette slots the left series don't use, so no hue is shared;
+  - they are dashed by default, always have open markers, and are never bars, since bars on
+    two axes overlap;
+  - the user can pick each series' right-axis color (`y2_color_slot`) and the line style
+    (`y2_line`: dashed, dotted, solid). The editor warns when a pick removes a cue: a color
+    shared with a left line, or solid lines;
+  - legend entries and hover name the quantity, and the legend shows even with one series;
+  - axis titles stay in text ink with a mark hint ("— Pace", "Heart rate - -");
+  - only the left axis draws gridlines.
+- **A companion query, not an API change.** The web app sends the panel twice, the second with
+  id `<panel id>~y2` and `y` swapped for `y2`, so the engine stays one-quantity-per-panel. The
+  request cap rose from 24 to 48 panel queries to cover 24 panels with a second quantity each.
+  Record-level quantities read the session's records twice; move `y2` into the API if that's
+  slow.
+- The table joins both quantities on series, x, and activity. With one point per lap or sample
+  there's no join key, so each quantity's points are listed with a "Quantity" column.
+- `y2` is optional, so `schema_version` stays 1.
+
+## 2026-10-31: Least-squares trendlines
+
+- Each quantity (left and right axis) has its own trendline toggle (`trend`, `y2_trend`). One
+  ordinary least-squares line per series, fitted in the browser to the values as plotted: display
+  units, with dates as wall-clock time. No API change, and toggling doesn't refetch.
+- Drawn as a thin, translucent line in the series' color over the series' own x range. It shares
+  the series' legend entry, so hiding a series hides its trend.
+- The rate of change and r² are listed under the panel (per week on date axes, per month for
+  monthly points, per x unit otherwise), so the trend can be read without hovering.
+- The fit uses only the plotted points: weeks or months with no activities are left out rather
+  than counted as zero. A series needs two distinct x values to get a trend.

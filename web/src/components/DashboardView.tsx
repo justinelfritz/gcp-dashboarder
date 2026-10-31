@@ -7,7 +7,7 @@ import type { ActivityType } from '../api/client'
 import type { FigureContext } from '../charts/buildFigure'
 import { currentTheme } from '../charts/palette'
 import { activityLabel, useActivities, useFieldCatalog, usePanelResults } from '../dashboard/hooks'
-import { blankPanel, isSelected, retitleForTypes, starterDashboard } from '../dashboard/model'
+import { blankPanel, isSelected, retitleForTypes, starterDashboard, Y2_SUFFIX } from '../dashboard/model'
 import { DashboardImportError, exportDashboard, parseDashboard } from '../dashboard/store'
 import type { useDashboards } from '../dashboard/store'
 import { newId, SCHEMA_VERSION } from '../dashboard/types'
@@ -216,6 +216,7 @@ export default function DashboardView({ sessionId, store, settings, onSettings, 
               <PanelCard
                 panel={p}
                 result={results.get(p.id)}
+                result2={p.y2 ? results.get(p.id + Y2_SUFFIX) : undefined}
                 loading={loading}
                 ctx={ctx}
                 onEdit={() => setEditing(p)}

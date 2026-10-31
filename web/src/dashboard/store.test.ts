@@ -22,6 +22,26 @@ describe('dashboard import/export', () => {
     expect(() => parseDashboard(bad)).toThrow(/selection mode/)
   })
 
+  it('round-trips a right-axis quantity, and loads panels without one', () => {
+    const d = starterDashboard()
+    d.panels[0] = { ...d.panels[0], y2: { field: 'avg_hr', level: 'activity', agg: 'mean' } }
+    const back = parseDashboard(exportDashboard(d))
+    expect(back.panels[0].y2).toEqual({ field: 'avg_hr', level: 'activity', agg: 'mean' })
+    expect(back.panels[1]).not.toHaveProperty('y2')
+    const styled = starterDashboard()
+    styled.panels[1] = { ...styled.panels[1], y2_line: 'dot', series: [{ ...styled.panels[1].series[0], y2_color_slot: 5 }] }
+    const again = parseDashboard(exportDashboard(styled)).panels[1]
+    expect(again.y2_line).toBe('dot')
+    expect(again).not.toHaveProperty('trend')
+    styled.panels[1] = { ...styled.panels[1], trend: true, y2_trend: true }
+    expect(parseDashboard(exportDashboard(styled)).panels[1]).toMatchObject({ trend: true, y2_trend: true })
+    expect(again.series[0].y2_color_slot).toBe(5)
+    const badLine = JSON.stringify({ schema_version: 1, panels: [{ y: { field: 'distance_m' }, y2_line: 'wavy' }] })
+    expect(() => parseDashboard(badLine)).toThrow(/right axis line/)
+    const bad = JSON.stringify({ schema_version: 1, panels: [{ y: { field: 'distance_m' }, y2: { level: 'lap' } }] })
+    expect(() => parseDashboard(bad)).toThrow(/right axis/)
+  })
+
   it('rejects bad input with a reason', () => {
     expect(() => parseDashboard('nope')).toThrow(DashboardImportError)
     expect(() => parseDashboard('{"schema_version": 2, "panels": []}')).toThrow(/schema_version/)
@@ -44,6 +64,15 @@ describe('dashboard import/export', () => {
 })
 
 describe('toQueryRequest', () => {
+  it('adds a companion query only for panels with a right-axis quantity', () => {
+    const d = starterDashboard()
+    d.panels[0] = { ...d.panels[0], y2: { field: 'avg_hr', level: 'activity', agg: 'mean' } }
+    const req = toQueryRequest(d, DEFAULT_SETTINGS)
+    expect(req.panels.map((p) => p.id)).toEqual([d.panels[0].id, `${d.panels[0].id}~y2`, ...d.panels.slice(1).map((p) => p.id)])
+    const [main, companion] = req.panels
+    expect(companion).toEqual({ ...main, id: companion.id, y: { field: 'avg_hr', level: 'activity', agg: 'mean' } })
+  })
+
   it('turns series distances into ± tolerance filters and presets into date ranges', () => {
     const req = toQueryRequest(starterDashboard(), { ...DEFAULT_SETTINGS, distance_tolerance: 0.03 })
     expect(req.distance_tolerance).toBe(0.03)

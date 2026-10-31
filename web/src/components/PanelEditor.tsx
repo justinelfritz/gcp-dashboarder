@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AxisSpec, FieldCatalog, FieldInfo, Level } from '../api/client'
 import { currentTheme, SCATTER_SERIES_LIMIT } from '../charts/palette'
-import { usesLaps, yAggregates } from '../dashboard/model'
-import { AGGREGATIONS, DISTANCE_PRESETS, PALETTE_SIZE } from '../dashboard/types'
-import type { PanelConfig, SeriesConfig, Settings } from '../dashboard/types'
+import { usesLaps, y2Slots, yAggregates } from '../dashboard/model'
+import { AGGREGATIONS, DISTANCE_PRESETS, LINE_STYLES, PALETTE_SIZE } from '../dashboard/types'
+import type { LineStyle, PanelConfig, SeriesConfig, Settings } from '../dashboard/types'
 
 const LEVEL_LABELS: Record<Level, string> = {
   activity: 'Activity summary',
@@ -47,6 +47,19 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
       return f.kind === 'number' || level === 'activity' || p.group_by === 'point'
     })
 
+  // In point mode every axis must share one row level (or be activity-level).
+  const y2Levels = (Object.keys(LEVEL_LABELS) as Level[]).filter((l) => {
+    if (p.group_by !== 'point' || l === 'activity') return true
+    const rowLevel = [p.x.level, p.y.level].find((v) => v && v !== 'activity')
+    return !rowLevel || rowLevel === l
+  })
+  const setY2Level = (level: Level) => {
+    const options = fieldsAt(level, 'y')
+    const keep = options.find((f) => f.name === p.y2?.field)
+    const pick = keep ?? options.find((f) => f.coverage > 0) ?? options[0]
+    if (pick) set({ y2: { ...(p.y2 ?? { agg: 'mean' }), level, field: pick.name } })
+  }
+
   const changeLevel = (axis: 'x' | 'y', level: Level) => {
     const current = p[axis]
     const options = fieldsAt(level, axis)
@@ -65,6 +78,7 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
 
   const timeGrouped = p.group_by === 'week' || p.group_by === 'month'
   const showYAgg = yAggregates(p)
+  const showY2Agg = !!p.y2 && yAggregates({ group_by: p.group_by, y: p.y2 })
   const showXAgg = p.group_by === 'activity' && p.x.level !== 'activity'
   const theme = currentTheme()
 
@@ -138,6 +152,10 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
             onLevel={(l) => changeLevel('y', l)}
             onChange={(y) => set({ y })}
           />
+          <label className="inline">
+            <input type="checkbox" checked={!!p.trend} onChange={(e) => set({ trend: e.target.checked })} />
+            Least-squares trendline
+          </label>
 
           {usesLaps(p) && (
             <fieldset className="row">
@@ -177,20 +195,8 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
             {p.series.map((s, i) => (
               <div className="series-row" key={i}>
                 <input aria-label={`Series ${i + 1} label`} value={s.label} onChange={(e) => setSeries(i, { label: e.target.value })} />
-                <div className="swatches" role="radiogroup" aria-label={`Series ${i + 1} color`}>
-                  {theme.series.map((color, slot) => (
-                    <button
-                      key={slot}
-                      type="button"
-                      role="radio"
-                      aria-checked={s.color_slot === slot}
-                      aria-label={`Color ${slot + 1}`}
-                      className="swatch"
-                      style={{ background: color }}
-                      onClick={() => setSeries(i, { color_slot: slot })}
-                    />
-                  ))}
-                </div>
+                <Swatches colors={theme.series} label={`Series ${i + 1} color`} value={s.color_slot}
+                  onChange={(color_slot) => setSeries(i, { color_slot })} />
                 <select
                   aria-label={`Series ${i + 1} sport`}
                   value={s.activity_type ?? ''}
@@ -225,12 +231,96 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
             )}
           </fieldset>
 
+          <fieldset className="row">
+            <legend>Right axis (optional)</legend>
+            <label className="inline">
+              <input
+                type="checkbox"
+                checked={!!p.y2}
+                onChange={(e) => (e.target.checked ? setY2Level(y2Levels.includes(p.y.level ?? 'activity') ? p.y.level ?? 'activity' : 'activity') : set({ y2: null }))}
+              />
+              Plot a second quantity
+            </label>
+            {p.y2 && (
+              <>
+                <select aria-label="Right axis data" value={p.y2.level} onChange={(e) => setY2Level(e.target.value as Level)}>
+                  {y2Levels.map((l) => <option key={l} value={l}>{LEVEL_LABELS[l]}</option>)}
+                </select>
+                <select aria-label="Right axis field" value={p.y2.field} onChange={(e) => set({ y2: { ...p.y2!, field: e.target.value } })}>
+                  {fieldsAt(p.y2.level ?? 'activity', 'y').map((f) => (
+                    <option key={f.name} value={f.name} disabled={f.coverage === 0 && f.name !== p.y2!.field}>
+                      {f.label} ({f.coverage}/{total})
+                    </option>
+                  ))}
+                </select>
+                {showY2Agg && (
+                  <select aria-label="Right axis aggregation" value={p.y2.agg ?? 'mean'}
+                    onChange={(e) => set({ y2: { ...p.y2!, agg: e.target.value as AxisSpec['agg'] } })}>
+                    {AGGREGATIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                  </select>
+                )}
+                {p.chart !== 'scatter' && (
+                  <select aria-label="Right axis line style" value={p.y2_line ?? 'dash'}
+                    onChange={(e) => set({ y2_line: e.target.value as LineStyle })}>
+                    {LINE_STYLES.map((l) => <option key={l.value} value={l.value}>{l.label} line</option>)}
+                  </select>
+                )}
+                <label className="inline">
+                  <input type="checkbox" checked={!!p.y2_trend} onChange={(e) => set({ y2_trend: e.target.checked })} />
+                  Least-squares trendline
+                </label>
+                <div className="y2-colors">
+                  {p.series.map((s, i) => (
+                    <div className="series-row" key={i}>
+                      <span className="series-name">{p.series.length > 1 ? s.label : 'Color'}</span>
+                      <Swatches colors={theme.series} label={`Right axis color for ${s.label}`} value={y2Slots(p)[i]}
+                        onChange={(y2_color_slot) => setSeries(i, { y2_color_slot })} />
+                    </div>
+                  ))}
+                </div>
+                {y2Slots(p).some((slot) => p.series.some((s) => s.color_slot === slot)) && (
+                  <span className="hint">A right-axis color matches a left-axis line; only the line style tells them apart.</span>
+                )}
+                {(p.y2_line ?? 'dash') === 'solid' && p.chart !== 'scatter' && (
+                  <span className="hint">With solid lines, only color and the open markers tell the two axes apart.</span>
+                )}
+                <span className="hint">
+                  Drawn on its own scale. Lines on different axes can't be compared by height or where they cross.
+                </span>
+              </>
+            )}
+          </fieldset>
+
           <div className="modal-actions">
             <button type="button" className="secondary" onClick={onCancel}>Cancel</button>
             <button type="submit">Save</button>
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+function Swatches({ colors, label, value, onChange }: {
+  colors: string[]
+  label: string
+  value: number
+  onChange: (slot: number) => void
+}) {
+  return (
+    <div className="swatches" role="radiogroup" aria-label={label}>
+      {colors.map((color, slot) => (
+        <button
+          key={slot}
+          type="button"
+          role="radio"
+          aria-checked={value === slot}
+          aria-label={`Color ${slot + 1}`}
+          className="swatch"
+          style={{ background: color }}
+          onClick={() => onChange(slot)}
+        />
+      ))}
     </div>
   )
 }

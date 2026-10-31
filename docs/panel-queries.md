@@ -35,6 +35,9 @@ Both apply after the sport and date filters.
 | `filters` | activity-level conditions for the whole panel | `[]` |
 | `series` | `[{ "label", "color", "filters" }]`, one plotted series each | one series, "All" |
 
+Up to 48 panels per request. The web app plots a panel's optional right-axis quantity by
+sending a companion panel: the same definition with id `<panel id>~y2` and its own `y`.
+
 Filters: `{ "field", "op", "value", "tolerance"? }` with `op` one of `eq`, `neq`, `in`,
 `between` (`[lo, hi]`), `gte`, `lte`, `near` (value ± tolerance; tolerance defaults to the
 request's `distance_tolerance`).
