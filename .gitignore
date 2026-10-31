@@ -23,3 +23,11 @@ web/dist/
 .DS_Store
 .idea/
 *.log
+
+# Firebase CLI state and any downloaded credentials (never commit keys)
+.firebase/
+firebase-debug.log*
+firebase-export-*/
+*service-account*.json
+*-credentials.json
+application_default_credentials.json

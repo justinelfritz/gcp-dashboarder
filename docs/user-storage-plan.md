@@ -1,8 +1,8 @@
 # Plan: persistent user storage
 
-Status: phases A–C done (2026-10-31); D proposed. Decisions made so far: sign-in by email + password + authenticator app (TOTP) (changed
-from email links), data kept until the
-user deletes it, and original files kept in cold storage.
+Status: phases A–C done (2026-10-31); D implemented, first deploy pending. Decisions made so far: sign-in by email +
+password (changed from email links; authenticator codes are built but off until prod), data kept
+until the user deletes it, and original files kept in cold storage.
 
 ## Problem
 
@@ -22,18 +22,21 @@ Goals:
 
 ## Design
 
-### Identity: Firebase Authentication, password + authenticator app
-- **Sign-in:** email (as the username) + password, then a 6-digit code from an authenticator app
-  (TOTP second factor). New accounts verify their email once (Firebase requires it before
-  enrolling a second factor) and then scan a QR code. Password reset is by Firebase's email.
+### Identity: Firebase Authentication, email + password
+- **Sign-in:** email (as the username) + password. New accounts verify their email once. Password
+  reset is by Firebase's email.
+- **Authenticator codes (TOTP) are built but off** until prod, because they need Identity
+  Platform. When on, new accounts scan a QR code after verifying their email, and each sign-in
+  asks for a 6-digit code.
 - **Tokens:** the frontend sends a Firebase ID token as `Authorization: Bearer …`. The API
-  verifies it with `firebase-admin` (`verify_id_token`), requires the second-factor claim, and a
+  verifies it with `firebase-admin` (`verify_id_token`), requires a verified email (and the
+  second-factor claim when codes are on), and a
   FastAPI dependency returns the user ID (`uid`).
 - **The `uid` comes only from the verified token**, never from the URL or the request body.
 - **Library:** the Firebase JS SDK (modular `firebase/auth`), loaded lazily so the first page
   load stays small.
 - **Local development:** the Firebase Auth emulator (no Firebase project needed) covers
-  everything except the authenticator step, which it can't do; see CLAUDE.md.
+  everything except authenticator codes, which it can't do; see CLAUDE.md.
 
 ### Storage layout (one bucket, prefixes per owner)
 ```
@@ -110,7 +113,7 @@ sessions/{id}/...                         guest data, unchanged, still deleted a
 
 ### Infrastructure
 - **Firebase:** add it to the existing GCP project, and enable Authentication with
-  Email/Password plus TOTP multi-factor.
+  Email/Password. TOTP multi-factor waits for prod (Identity Platform).
 - **Frontend hosting:** move to **Firebase Hosting**.
   - Sign-in needs an authorized domain (for the verification and reset emails' return links),
     and `storage.googleapis.com` is a poor fit.
@@ -118,9 +121,9 @@ sessions/{id}/...                         guest data, unchanged, still deleted a
   - The API's allowed origin (`DASHBOARDER_CORS_ORIGINS`) changes to the Hosting domain.
 - **`deploy.sh`:** add the prefix-scoped lifecycle rules, Firebase config injection
   (`VITE_FIREBASE_*`), and `firebase deploy --only hosting`.
-- **Before deploying:** upgrade the project to Identity Platform, enable Email/Password, and
-  enable TOTP multi-factor (done with the API or gcloud, not the console). Set a password policy
-  to match the app's 10-character minimum.
+- **Before deploying:** enable Email/Password. Set a password policy to match the app's
+  10-character minimum. For prod with codes: upgrade to Identity Platform and enable TOTP
+  multi-factor (done with the API or gcloud, not the console).
 
 ### Security and privacy
 - Data is isolated by the `uid` prefix taken from the verified token, and tests cover every
@@ -143,7 +146,7 @@ sessions/{id}/...                         guest data, unchanged, still deleted a
 | Phase | Scope | Value on its own |
 |---|---|---|
 | **A. Faster uploads** (no sign-in) | Prefix-scoped lifecycle rule; SHA-256 manifest + `uploads/check`; browser hashing and skip; library summary; "adding new activities" guide | Re-uploading the full ZIP sends only new files |
-| **B. Accounts** | Firebase email + password + authenticator (emulator in dev); token-verifying dependency; owner-agnostic store; `/me` routes; guest claim; per-account limits | Data persists and follows the user |
+| **B. Accounts** | Firebase email + password, optional authenticator (emulator in dev); token-verifying dependency; owner-agnostic store; `/me` routes; guest claim; per-account limits | Data persists and follows the user |
 | **C. Sync and control** | Dashboards/settings sync; delete activity / delete all; privacy note | Same dashboards on every device; user controls their data |
 | **D. Deploy** | Firebase Hosting; deploy.sh updates; Coldline rule; quota and deliverability check | Running in GCP |
 

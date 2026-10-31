@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, guestScope, USER_SCOPE } from './api/client'
+import { api, ApiError, guestScope, USER_SCOPE } from './api/client'
 import type { Scope } from './api/client'
 import { forgetSession, getOrCreateSessionId, storedSessionId } from './api/session'
 import { useAuth } from './auth/useAuth'
@@ -25,7 +25,7 @@ export default function App() {
   const store = useDashboards(owner)
   const [settings, setSettings] = useSettings(owner)
   const sync = useAccountSync(owner, store.saved, settings, store.replace, setSettings)
-  // Until a new account finishes setup (verified email, authenticator), the app stays a guest.
+  // Until a new account finishes setup (verified email, authenticator if required), the app stays a guest.
   const authSettled = auth.state.status !== 'loading'
 
   useEffect(() => {
@@ -52,7 +52,9 @@ export default function App() {
         const { total } = await api.activities(s, { limit: 1 })
         if (!cancelled && total === 0) setTab('data')
       })
-      .catch(() => !cancelled && setApiStatus('error'))
+      // Only a failure to reach the API means it's unavailable; a refused request is shown where
+      // it happens.
+      .catch((err) => !cancelled && !(err instanceof ApiError) && setApiStatus('error'))
     return () => {
       cancelled = true
     }

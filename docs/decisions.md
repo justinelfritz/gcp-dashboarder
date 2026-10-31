@@ -284,3 +284,37 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
   range from the first draw (the default "last 90 days").
 - With a single week or month on a period-wide axis, Plotly can't infer bar width and draws a
   hairline; such bars get an explicit bucket-sized width.
+
+## 2026-10-31: Password-only sign-in for dev; authenticator codes off until prod
+
+- TOTP needs the Firebase project upgraded to Identity Platform (and the Blaze plan). The user
+  chose not to upgrade the dev project, so sign-in is **email + password** for now. Revisit when
+  prod is deployed.
+- **The TOTP code stays**, behind one switch: `DASHBOARDER_REQUIRE_SECOND_FACTOR=true` (API) and
+  `VITE_REQUIRE_SECOND_FACTOR=true` (web build), set together. Both now default to off, so the
+  emulator runs need no special flags.
+- **A verified email is now required for every account**, and the API checks it too (403 when the
+  token's `email_verified` claim isn't true). The address is what password resets go to, and
+  verifying stops anyone from holding an account under someone else's email.
+- What protects a password-only account: Firebase's own throttling of repeated wrong guesses, the
+  10-character minimum, and the reset email. The minimum is only checked in the web app; Firebase
+  itself enforces 6 unless the project's password policy is set, which may need Identity Platform
+  (check in phase D).
+  What it loses: a leaked or reused password is enough to reach the account's data, including GPS
+  inside original files.
+
+## 2026-10-31: Deploying (user storage, phase D)
+
+- **Frontend on Firebase Hosting** (`https://<project>.web.app`), replacing the public GCS
+  bucket: the email links need an authorized domain, and Hosting adds a CDN and HTTPS. Served
+  from `/firebase.json` (single-page rewrite; hashed assets cached a year, `index.html`
+  revalidated). The same file configures the local Auth emulator.
+- **One data bucket**, `<project>-dashboarder-data-<env>` (was `…-sessions-…`; the new project had
+  none yet): guests under `sessions/` expire, accounts under `users/` are kept, and their original
+  uploads move to Coldline after 30 days.
+- **`deploy.sh` reads the Firebase web config** (API key) from the project rather than from the
+  repo, sets the API's Firebase project and CORS origins to the Hosting domains, grants the runtime
+  service account `firebaseauth.admin` (for "Delete all my data"), and sets a 10-character password
+  policy.
+- **One `REQUIRE_SECOND_FACTOR` switch** feeds both the API and the web build. `ENV=prod` refuses to
+  deploy without it unless `ALLOW_PASSWORD_ONLY=1`.

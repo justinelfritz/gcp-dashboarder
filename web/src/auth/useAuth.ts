@@ -7,15 +7,15 @@ export type AuthState =
   | { status: 'disabled' } // sign-in isn't configured: guest sessions only
   | { status: 'loading' }
   | { status: 'signed-out' }
-  // Signed in with the password only, and the account isn't ready yet:
+  // Signed in with the password, and the account isn't ready yet:
   | { status: 'verify-email'; user: AuthUser } // step 1 of a new account
-  | { status: 'setup-authenticator'; user: AuthUser } // step 2
+  | { status: 'setup-authenticator'; user: AuthUser } // step 2, only when codes are required
   | { status: 'signed-in'; user: AuthUser }
 
-function stateFor(user: AuthUser | null): AuthState | 'needs-code' {
+export function stateFor(user: AuthUser | null): AuthState | 'needs-code' {
   if (!user) return { status: 'signed-out' }
-  if (!fb.requireSecondFactor || user.usedSecondFactor) return { status: 'signed-in', user }
   if (!user.emailVerified) return { status: 'verify-email', user }
+  if (!fb.requireSecondFactor || user.usedSecondFactor) return { status: 'signed-in', user }
   if (!user.hasAuthenticator) return { status: 'setup-authenticator', user }
   // Has an authenticator but this sign-in didn't use it (e.g. right after enrolling, if the token
   // doesn't record it): sign in again with a code.

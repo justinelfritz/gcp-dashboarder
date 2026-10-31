@@ -1,12 +1,13 @@
 """Signed-in users: verify Firebase ID tokens sent as `Authorization: Bearer <token>`.
 
-Users sign in with email + password and a code from an authenticator app (TOTP). The API only
-accepts tokens from a sign-in that used that second factor, so a stolen password alone can't
-reach anyone's data, and an account can't be used until its authenticator is set up.
+Users sign in with email + password, and an account can't be used until its email is verified
+(the address is what a password reset goes to). With DASHBOARDER_REQUIRE_SECOND_FACTOR=true the
+API also only accepts sign-ins that used a code from an authenticator app (TOTP), so a stolen
+password alone can't reach anyone's data. That needs the Firebase project on Identity Platform.
 
 With `FIREBASE_AUTH_EMULATOR_HOST` set (local development), firebase-admin accepts the Auth
 emulator's unsigned tokens, so no Firebase project or credentials are needed. The emulator can't
-do authenticator codes, so local runs against it set DASHBOARDER_REQUIRE_SECOND_FACTOR=false.
+do authenticator codes, so keep the second factor off for local runs against it.
 """
 
 import logging
@@ -70,7 +71,7 @@ def current_user(
     verify: Annotated[TokenVerifier, Depends(get_token_verifier)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> str:
-    """The signed-in user's UID, taken only from a verified token that used a second factor."""
+    """The signed-in user's UID, taken only from a verified token for a verified email."""
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(401, "sign in required", headers={"WWW-Authenticate": "Bearer"})
@@ -83,6 +84,8 @@ def current_user(
     uid = claims.get("uid", "")
     if not UID_PATTERN.fullmatch(uid):
         raise HTTPException(401, "invalid user id")
+    if claims.get("email_verified") is not True:
+        raise HTTPException(403, "verify your email address first")
     second_factor = (claims.get("firebase") or {}).get("sign_in_second_factor")
     if get_settings().require_second_factor and not second_factor:
         raise HTTPException(403, "set up an authenticator app and sign in with a code")

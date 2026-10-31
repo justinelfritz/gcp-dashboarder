@@ -4,7 +4,7 @@ import { AuthenticatorDialog, SignInDialog, VerifyEmailDialog } from './AuthDial
 
 /**
  * Header control: "Sign in" for guests; the account's email and "Sign out" once signed in. A new
- * account's remaining setup steps (verify the email, add an authenticator) open automatically.
+ * account's remaining setup steps (verify the email, add an authenticator if required) open automatically.
  */
 export default function AccountMenu({ auth }: { auth: Auth }) {
   const [open, setOpen] = useState(false)

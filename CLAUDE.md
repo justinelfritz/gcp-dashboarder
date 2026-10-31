@@ -16,16 +16,18 @@ The full plan is in `dashboarder-plan.md`; architecture decisions are logged in 
 - API dev server: `cd api && uv run uvicorn app.main:app --reload --port 8080`
 - Web tests: `cd web && npm test`
 - Web dev server: `cd web && npm run dev` (expects the API on `localhost:8080`)
-- Sign-in locally (optional; without it the app is guest-only): run the Auth emulator from a
-  directory with a `firebase.json` enabling `auth` on port 9099:
+- Sign-in locally (optional; without it the app is guest-only): from the repo root (its
+  `firebase.json` puts the Auth emulator on port 9099), run
   `npx firebase-tools@15.33.0 emulators:start --only auth --project demo-dashboarder`. Start the API
-  with `DASHBOARDER_FIREBASE_PROJECT_ID=demo-dashboarder FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099
-  DASHBOARDER_REQUIRE_SECOND_FACTOR=false`, and the web app with the `VITE_FIREBASE_*` variables and
-  `VITE_REQUIRE_SECOND_FACTOR=false` from `web/.env.example` (any API key; project
-  `demo-dashboarder`). The emulator can't do authenticator (TOTP) codes, hence the `false`; test that
-  step against a real Firebase dev project. Verification and reset emails are listed at
-  `http://127.0.0.1:9099/emulator/v1/projects/demo-dashboarder/oobCodes`.
-- Deploy: `PROJECT_ID=... ENV=dev ./infra/deploy.sh`
+  with `DASHBOARDER_FIREBASE_PROJECT_ID=demo-dashboarder FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099`,
+  and the web app with the `VITE_FIREBASE_*` variables from `web/.env.example` (any API key; project
+  `demo-dashboarder`). New accounts must verify their email: the verification and reset emails are
+  listed at `http://127.0.0.1:9099/emulator/v1/projects/demo-dashboarder/oobCodes`.
+- Sign-in is email + password. Authenticator (TOTP) codes are built but off until prod: turning
+  them on needs Identity Platform plus `DASHBOARDER_REQUIRE_SECOND_FACTOR=true` and
+  `VITE_REQUIRE_SECOND_FACTOR=true` together. The emulator can't do TOTP.
+- Deploy: `PROJECT_ID=custom-dashboarder-dev ENV=dev ./infra/deploy.sh` (see `infra/README.md`;
+  needs a one-time `npx firebase-tools@15.33.0 login`).
 
 ## Conventions
 

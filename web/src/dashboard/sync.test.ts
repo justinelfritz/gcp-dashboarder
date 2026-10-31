@@ -53,6 +53,20 @@ describe('useAccountSync', () => {
     expect(saveDashboards).not.toHaveBeenCalled()
   })
 
+  it('keeps retrying when the account copy fails to load, and saves nothing meanwhile', async () => {
+    getDashboards
+      .mockRejectedValueOnce(new ApiError('verify your email address first', 403, null))
+      .mockResolvedValue({ document: null, generation: 0 })
+    saveDashboards.mockResolvedValue({ generation: 1 })
+    const { result } = setup(board('Local'))
+    await waitFor(() => expect(result.current.status).toBe('offline'))
+    expect(saveDashboards).not.toHaveBeenCalled()
+    await act(() => vi.advanceTimersByTimeAsync(2500))
+    await waitFor(() => expect(getDashboards).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(saveDashboards).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(result.current.status).toBe('saved'))
+  })
+
   it('uploads this browser\'s copy the first time, then saves later changes on top of it', async () => {
     getDashboards.mockResolvedValue({ document: null, generation: 0 })
     saveDashboards.mockResolvedValueOnce({ generation: 1 }).mockResolvedValueOnce({ generation: 2 })

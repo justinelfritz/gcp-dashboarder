@@ -14,12 +14,14 @@ TOKENS = {"token-alice": "alice", "token-bob": "bob", "token-weird": "../../etc"
 
 
 def fake_verify(token: str) -> dict:
-    if token == "token-password-only":
-        return {"uid": "carol", "firebase": {"sign_in_provider": "password"}}
+    if token == "token-unverified":
+        return {"uid": "dave", "email_verified": False, "firebase": {"sign_in_provider": "password"}}
+    if token == "token-with-code":
+        return {"uid": "erin", "email_verified": True,
+                "firebase": {"sign_in_provider": "password", "sign_in_second_factor": "totp"}}
     if token not in TOKENS:
         raise ValueError("bad token")
-    return {"uid": TOKENS[token],
-            "firebase": {"sign_in_provider": "password", "sign_in_second_factor": "totp"}}
+    return {"uid": TOKENS[token], "email_verified": True, "firebase": {"sign_in_provider": "password"}}
 
 
 @pytest.fixture
@@ -56,13 +58,20 @@ def test_me_routes_need_a_valid_token(client):
     assert client.get("/me/library", headers=auth("alice")).status_code == 200
 
 
-def test_second_factor_required(client, monkeypatch):
-    # A password-only sign-in (no authenticator code yet) can't reach any data.
-    resp = client.get("/me/library", headers=auth("password-only"))
+def test_email_must_be_verified(client):
+    resp = client.get("/me/library", headers=auth("unverified"))
+    assert resp.status_code == 403
+    assert "verify your email" in resp.json()["detail"]
+
+
+def test_second_factor_required_when_turned_on(client, monkeypatch):
+    # Off by default: a password sign-in is enough.
+    assert client.get("/me/library", headers=auth("alice")).status_code == 200
+    monkeypatch.setattr(settings, "require_second_factor", True)
+    resp = client.get("/me/library", headers=auth("alice"))
     assert resp.status_code == 403
     assert "authenticator" in resp.json()["detail"]
-    monkeypatch.setattr(settings, "require_second_factor", False)  # local emulator runs only
-    assert client.get("/me/library", headers=auth("password-only")).status_code == 200
+    assert client.get("/me/library", headers=auth("with-code")).status_code == 200
 
 
 def test_sign_in_disabled_without_a_firebase_project(storage, monkeypatch):

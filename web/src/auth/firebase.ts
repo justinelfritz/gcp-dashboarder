@@ -1,6 +1,6 @@
-// Firebase Authentication: email + password, plus a code from an authenticator app (TOTP) as the
-// second factor. The SDK is imported lazily, and only when sign-in is configured, so guest-only
-// builds never download it.
+// Firebase Authentication: email + password, optionally plus a code from an authenticator app
+// (TOTP) as a second factor. The SDK is imported lazily, and only when sign-in is configured, so
+// guest-only builds never download it.
 import type { Auth, MultiFactorError, User } from 'firebase/auth'
 
 const config = {
@@ -12,8 +12,11 @@ const EMULATOR_URL = import.meta.env.VITE_FIREBASE_AUTH_EMULATOR_URL
 const ISSUER = 'Custom Dashboarder'
 
 export const signInEnabled = Boolean(config.apiKey && config.projectId)
-/** The API only accepts sign-ins that used an authenticator code. Off only for emulator runs. */
-export const requireSecondFactor = import.meta.env.VITE_REQUIRE_SECOND_FACTOR !== 'false'
+/**
+ * Also require an authenticator code (TOTP) at sign-in. Off unless built with
+ * VITE_REQUIRE_SECOND_FACTOR=true; needs Identity Platform, and the API's matching setting.
+ */
+export const requireSecondFactor = import.meta.env.VITE_REQUIRE_SECOND_FACTOR === 'true'
 
 export interface AuthUser {
   uid: string
@@ -41,7 +44,10 @@ const returnUrl = () => ({ url: window.location.origin + window.location.pathnam
 
 async function describe(user: User): Promise<AuthUser> {
   const { sdk } = await load()
-  const token = await user.getIdTokenResult()
+  let token = await user.getIdTokenResult()
+  // A token issued before the email was verified still says it isn't, and the API goes by the
+  // token. On page load the SDK re-reads the account but keeps that token, so refresh it first.
+  if (user.emailVerified && token.claims.email_verified !== true) token = await user.getIdTokenResult(true)
   const firebase = token.claims.firebase as { sign_in_second_factor?: string } | undefined
   return {
     uid: user.uid,

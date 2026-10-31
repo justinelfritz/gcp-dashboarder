@@ -7,6 +7,8 @@ import type { Saved } from './store'
 import type { Settings } from './types'
 
 const SAVE_DELAY_MS = 800
+// Waits before retrying a failed load of the account's dashboards: quick at first, then every minute.
+const LOAD_RETRY_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 
 export type SyncStatus = 'off' | 'loading' | 'saving' | 'saved' | 'offline'
 
@@ -55,18 +57,28 @@ export function useAccountSync(
       return
     }
     let cancelled = false
+    let retry: ReturnType<typeof setTimeout> | undefined
     setStatus('loading')
-    api
-      .getDashboards()
-      .then((r) => {
-        if (cancelled) return
-        adopt.current(r)
-        setLoaded(owner)
-        setStatus('saved')
-      })
-      .catch(() => !cancelled && setStatus('offline'))
+    // Until the account's copy loads, nothing is saved (it would overwrite it), so keep trying.
+    const fetchDashboards = (attempt: number) => {
+      api
+        .getDashboards()
+        .then((r) => {
+          if (cancelled) return
+          adopt.current(r)
+          setLoaded(owner)
+          setStatus('saved')
+        })
+        .catch(() => {
+          if (cancelled) return
+          setStatus('offline')
+          retry = setTimeout(() => fetchDashboards(attempt + 1), LOAD_RETRY_MS[Math.min(attempt, LOAD_RETRY_MS.length - 1)])
+        })
+    }
+    fetchDashboards(0)
     return () => {
       cancelled = true
+      clearTimeout(retry)
     }
   }, [owner])
 

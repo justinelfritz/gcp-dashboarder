@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { authErrorMessage } from '../auth/firebase'
+import { authErrorMessage, requireSecondFactor } from '../auth/firebase'
 import type { AuthenticatorSetup } from '../auth/firebase'
 import type { Auth } from '../auth/useAuth'
 
@@ -120,7 +120,7 @@ export function SignInDialog({ auth, onClose }: { auth: Auth; onClose: () => voi
   const ready = addr && (creating ? password.length >= MIN_PASSWORD && confirm === password : password)
   const submit = () => run(async () => {
     // Close once signed in, so signing out later doesn't reopen this dialog. Any remaining
-    // setup steps (verify the email, add an authenticator) open on their own.
+    // setup steps (verify the email, maybe add an authenticator) open on their own.
     if (creating) {
       await auth.createAccount(addr, password)
       onClose()
@@ -138,8 +138,11 @@ export function SignInDialog({ auth, onClose }: { auth: Auth; onClose: () => voi
         {!auth.notice && (
           <p className="status">
             {creating
-              ? 'Your uploads are kept in your account until you delete them, on any device you sign in from. Sign-in uses your password plus a code from an authenticator app.'
-              : 'Use your email, password, and the code from your authenticator app.'}
+              ? 'Your uploads are kept in your account until you delete them, on any device you sign in from.' +
+                (requireSecondFactor ? ' Sign-in uses your password plus a code from an authenticator app.' : '')
+              : requireSecondFactor
+                ? 'Use your email, password, and the code from your authenticator app.'
+                : 'Use your email and password.'}
           </p>
         )}
         <label className="field">
@@ -181,7 +184,10 @@ export function SignInDialog({ auth, onClose }: { auth: Auth; onClose: () => voi
   )
 }
 
-/** New account, step 1: Firebase requires a verified email before an authenticator can be added. */
+/**
+ * New account, step 1: verify the email, which password resets go to (and which Firebase requires
+ * before an authenticator can be added).
+ */
 export function VerifyEmailDialog({ auth, email }: { auth: Auth; email: string }) {
   const { busy, error, run } = useStep()
   const [checked, setChecked] = useState(false)
@@ -190,7 +196,8 @@ export function VerifyEmailDialog({ auth, email }: { auth: Auth; email: string }
     <Dialog title="Verify your email">
       <p>
         We sent a verification email to <strong>{email}</strong>. Open the link in it, then come back here.
-        This is needed once, before you add an authenticator app. It may land in your spam folder.
+        This is needed once{requireSecondFactor ? ', before you add an authenticator app' : ''}. It may land in
+        your spam folder.
       </p>
       {checked && !busy && !error && <p className="status status-error">Not verified yet. Open the link in the email first.</p>}
       {resent && <p className="status status-ok">Sent again.</p>}
@@ -210,7 +217,7 @@ export function VerifyEmailDialog({ auth, email }: { auth: Auth; email: string }
   )
 }
 
-/** New account, step 2: enroll an authenticator app by QR code (or by typing the key). */
+/** New account, step 2 when codes are required: enroll an authenticator app by QR code (or key). */
 export function AuthenticatorDialog({ auth }: { auth: Auth }) {
   const [setup, setSetup] = useState<AuthenticatorSetup | null>(null)
   const [qr, setQr] = useState<string | null>(null)
