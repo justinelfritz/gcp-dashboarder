@@ -133,7 +133,8 @@ class PanelQuery(BaseModel):
 
 class QueryRequest(BaseModel):
     filters: DisplayFilters = DisplayFilters()
-    panels: list[PanelQuery] = PydanticField(max_length=24)
+    # 24 dashboard panels, each with an optional right-axis companion query.
+    panels: list[PanelQuery] = PydanticField(max_length=48)
     distance_tolerance: float = PydanticField(default=0.025, ge=0, le=0.5)
 
 

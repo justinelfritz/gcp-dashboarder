@@ -1,6 +1,6 @@
 // Translating dashboard definitions into API queries, plus starter content.
 import type { ActivityType, DateRange, DisplayFilters, PanelQuery, QueryRequest } from '../api/client'
-import { newId, SCHEMA_VERSION } from './types'
+import { newId, PALETTE_SIZE, SCHEMA_VERSION } from './types'
 import type { ActivitySelection, Dashboard, DashboardFilters, PanelConfig, Settings } from './types'
 
 const PRESET_DAYS: Record<string, number> = {
@@ -64,10 +64,29 @@ export function toPanelQuery(p: PanelConfig): PanelQuery {
   }
 }
 
+/**
+ * Palette slots for the right-axis lines. A series' own pick wins; otherwise it takes a slot the
+ * left series don't use, in palette order, so the two axes never share a hue by default.
+ */
+export function y2Slots(p: Pick<PanelConfig, 'series'>): number[] {
+  const used = new Set(p.series.map((s) => s.color_slot % PALETTE_SIZE))
+  const free = [...Array(PALETTE_SIZE).keys()].filter((k) => !used.has(k))
+  return p.series.map((s, i) =>
+    s.y2_color_slot ?? (free.length ? free[i % free.length] : (s.color_slot + 1) % PALETTE_SIZE))
+}
+
+/** Id suffix of the companion query that fetches a panel's right-axis quantity. */
+export const Y2_SUFFIX = '~y2'
+
 export function toQueryRequest(d: Dashboard, settings: Settings): QueryRequest {
   return {
     filters: toDisplayFilters(d.filters),
-    panels: d.panels.map(toPanelQuery),
+    // The right-axis quantity is its own query: the same panel with y swapped, so the API needs no
+    // notion of a second axis.
+    panels: d.panels.flatMap((p) => {
+      const q = toPanelQuery(p)
+      return p.y2 ? [q, { ...q, id: p.id + Y2_SUFFIX, y: p.y2 }] : [q]
+    }),
     distance_tolerance: settings.distance_tolerance,
   }
 }
@@ -78,8 +97,9 @@ export function yAggregates(p: Pick<PanelConfig, 'group_by' | 'y'>): boolean {
   return p.group_by !== 'activity' || p.y.level !== 'activity'
 }
 
-export function usesLaps(p: Pick<PanelConfig, 'x' | 'y' | 'group_by'>): boolean {
-  return p.y.level === 'lap' || (p.group_by !== 'week' && p.group_by !== 'month' && p.x.level === 'lap')
+export function usesLaps(p: Pick<PanelConfig, 'x' | 'y' | 'y2' | 'group_by'>): boolean {
+  if (p.y.level === 'lap' || p.y2?.level === 'lap') return true
+  return p.group_by !== 'week' && p.group_by !== 'month' && p.x.level === 'lap'
 }
 
 export function blankPanel(y: number): PanelConfig {

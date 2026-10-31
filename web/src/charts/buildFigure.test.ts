@@ -3,7 +3,7 @@ import type { PanelResult } from '../api/client'
 import { blankPanel } from '../dashboard/model'
 import { DEFAULT_SETTINGS } from '../dashboard/types'
 import type { PanelConfig } from '../dashboard/types'
-import { buildFigure, buildTable } from './buildFigure'
+import { buildFigure, buildTable, leastSquares, trendNotes } from './buildFigure'
 import { DARK, LIGHT } from './palette'
 
 // The trace fields these tests read; Plotly's Data union doesn't narrow on its own.
@@ -116,5 +116,128 @@ describe('buildTable', () => {
     expect(table.columns).toEqual(['Series', 'Date', 'Lap pace (min/mi)', '±', 'n', 'Activity'])
     expect(table.rows).toHaveLength(3)
     expect(table.rows[0].slice(2)).toEqual(['11:16', '0:10', '3', 'Morning Run'])
+  })
+})
+
+describe('right-axis quantity', () => {
+  const hrPanel: PanelConfig = { ...pacePanel, y2: { field: 'avg_hr', level: 'activity', agg: 'mean' } }
+  const hrResult: PanelResult = {
+    ...paceResult,
+    id: `${pacePanel.id}~y2`,
+    y: { field: 'avg_hr', label: 'Average heart rate', unit: 'bpm', kind: 'number' },
+    series: [
+      { label: '5k', color: null, n_activities: 2, points: [
+        { x: '2026-09-05T08:00:00', y: 150, error: null, n: 1, activity_id: 'a1' },
+        { x: '2026-09-12T08:00:00', y: 155, error: null, n: 1, activity_id: 'a2' },
+      ] },
+      { label: '10k', color: null, n_activities: 1, points: [
+        { x: '2026-09-19T08:00:00', y: 160, error: null, n: 1, activity_id: 'a3' },
+      ] },
+    ],
+  }
+  interface Y2Trace extends Trace { yaxis: string; name: string; line: { dash?: string }; marker: { color: string; line: { color: string } } }
+
+  it('draws the second quantity dashed on its own right axis, with its own unit and hues', () => {
+    const { data, layout } = buildFigure(hrPanel, paceResult, ctx, hrResult)
+    const all = data as unknown as Y2Trace[]
+    expect(all.map((t) => t.yaxis)).toEqual(['y', 'y', 'y2', 'y2'])
+    const [, , hr5k, hr10k] = all
+    expect(hr5k.line.dash).toBe('dash')
+    expect(hr5k.y[0]).toBe(150) // bpm needs no conversion
+    // Slots 0 and 1 belong to the left series, so the right axis takes the next free ones.
+    expect(hr5k.marker.line.color).toBe(LIGHT.series[2])
+    expect(hr10k.marker.line.color).toBe(LIGHT.series[3])
+    expect(hr5k.name).toBe('5k · Average heart rate')
+    expect(layout.yaxis2).toMatchObject({ overlaying: 'y', side: 'right', showgrid: false })
+    expect(layout.yaxis2?.title).toMatchObject({ text: 'Average heart rate (bpm) - -' })
+    expect(layout.yaxis2?.autorange).not.toBe(false) // not a reversed clock axis like pace
+    const range = layout.yaxis?.range as number[]
+    expect(range[0]).toBeGreaterThan(range[1]) // the left pace axis stays reversed
+  })
+
+  it('uses the chosen right-axis colors and line style', () => {
+    const styled: PanelConfig = {
+      ...hrPanel,
+      y2_line: 'dot',
+      series: [{ ...hrPanel.series[0], y2_color_slot: 6 }, hrPanel.series[1]],
+    }
+    const { data, layout } = buildFigure(styled, paceResult, ctx, hrResult)
+    const [, , hr5k, hr10k] = data as unknown as Y2Trace[]
+    expect(hr5k.line.dash).toBe('dot')
+    expect(hr5k.marker.line.color).toBe(LIGHT.series[6])
+    expect(hr10k.marker.line.color).toBe(LIGHT.series[3]) // no pick: second free slot
+    expect(layout.yaxis2?.title).toMatchObject({ text: 'Average heart rate (bpm) ···' })
+  })
+
+  it('names the quantity in the legend even with one series', () => {
+    const one = { ...hrPanel, series: [pacePanel.series[0]] }
+    const { data, layout } = buildFigure(one, { ...paceResult, series: [paceResult.series[0]] }, ctx, { ...hrResult, series: [hrResult.series[0]] })
+    expect(layout.showlegend).toBe(true)
+    expect((data as unknown as Y2Trace[]).map((t) => t.name)).toEqual(['Lap pace', 'Average heart rate'])
+  })
+
+  it('draws the second quantity as a line on bar charts', () => {
+    const { data } = buildFigure({ ...hrPanel, chart: 'bar' }, paceResult, ctx, hrResult)
+    expect(traces(data).map((t) => t.type)).toEqual(['bar', 'bar', 'scatter', 'scatter'])
+  })
+
+  it('ignores a failed right-axis result', () => {
+    const { data, layout } = buildFigure(hrPanel, paceResult, ctx, { ...hrResult, error: 'bad field' })
+    expect(data).toHaveLength(2)
+    expect(layout.yaxis2).toBeUndefined()
+  })
+
+  it('joins both quantities into one table row per point', () => {
+    const table = buildTable(hrPanel, paceResult, ctx, hrResult)
+    expect(table.columns).toEqual(['Series', 'Date', 'Lap pace (min/mi)', '±', 'Average heart rate (bpm)', '± ', 'n', 'Activity'])
+    expect(table.rows).toHaveLength(3)
+    expect(table.rows[0].slice(2, 6)).toEqual(['11:16', '0:10', '150', ''])
+  })
+})
+
+describe('trendlines', () => {
+  interface TrendTrace { name: string; mode?: string; x: (string | number)[]; y: number[]; yaxis: string; showlegend?: boolean; line: { color: string } }
+
+  it('fits a least-squares line', () => {
+    const fit = leastSquares([0, 1, 2, 3], [1, 3, 5, 7])!
+    expect(fit.slope).toBeCloseTo(2)
+    expect(fit.intercept).toBeCloseTo(1)
+    expect(fit.r2).toBeCloseTo(1)
+    expect(leastSquares([1], [1])).toBeNull()
+    expect(leastSquares([2, 2], [1, 5])).toBeNull() // no x spread
+  })
+
+  it('adds a thin trend per series in its color, over the series\' x range', () => {
+    const { data } = buildFigure({ ...pacePanel, trend: true }, paceResult, ctx)
+    const all = data as unknown as TrendTrace[]
+    // 5k has two points and gets a trend; 10k has one point and doesn't.
+    expect(all.map((t) => t.name)).toEqual(['5k', '5k trend', '10k'])
+    const trend = all[1]
+    expect(trend.mode).toBe('lines')
+    expect(trend.showlegend).toBe(false)
+    expect(trend.line.color).toBe(LIGHT.series[0])
+    expect(trend.x).toEqual(['2026-09-05 08:00:00', '2026-09-12 08:00:00'])
+    expect(trend.y[0]).toBeCloseTo(420 * 1.609344)
+    expect(trend.y[1]).toBeCloseTo(410 * 1.609344)
+  })
+
+  it('reports the rate per week, in display units', () => {
+    const notes = trendNotes({ ...pacePanel, trend: true }, paceResult, ctx)
+    // 10 s/km faster in one week is 16 s/mi.
+    expect(notes).toEqual(['5k trend: −0:16 min/mi per week (r² 1.00)'])
+    expect(trendNotes(pacePanel, paceResult, ctx)).toEqual([])
+  })
+
+  it('fits the right-axis quantity on its own axis', () => {
+    const hrPanel: PanelConfig = { ...pacePanel, y2: { field: 'avg_hr', level: 'activity', agg: 'mean' }, y2_trend: true }
+    const hrResult: PanelResult = {
+      ...paceResult,
+      y: { field: 'avg_hr', label: 'Average heart rate', unit: 'bpm', kind: 'number' },
+      series: [{ ...paceResult.series[0], points: paceResult.series[0].points.map((p, i) => ({ ...p, y: 150 + 7 * i, error: null })) }, paceResult.series[1]],
+    }
+    const all = buildFigure(hrPanel, paceResult, ctx, hrResult).data as unknown as TrendTrace[]
+    const trends = all.filter((t) => t.name.endsWith('trend'))
+    expect(trends.map((t) => [t.name, t.yaxis])).toEqual([['5k · Average heart rate trend', 'y2']])
+    expect(trendNotes(hrPanel, paceResult, ctx, hrResult)).toEqual(['5k · Average heart rate trend: +7 bpm per week (r² 1.00)'])
   })
 })

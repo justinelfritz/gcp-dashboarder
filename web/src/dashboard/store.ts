@@ -36,6 +36,7 @@ const CHARTS = ['line', 'scatter', 'bar']
 const GROUPS = ['activity', 'week', 'month', 'point']
 const LAP_KINDS = ['device', 'split_km', 'split_mi']
 const ERRORS = ['none', 'std', 'sem']
+const LINES = ['dash', 'dot', 'solid']
 const AGGS = ['mean', 'median', 'min', 'max', 'sum', 'count', 'std']
 const TYPES = ['run', 'ride', 'hike']
 const DATE_PRESETS = ['last_30', 'last_60', 'last_90', 'last_180', 'last_365', 'all', 'custom']
@@ -69,10 +70,13 @@ function axis(value: unknown, what: string) {
 function series(value: unknown, i: number): SeriesConfig {
   const s = (value ?? {}) as Record<string, unknown>
   const slot = Math.trunc(num(s.color_slot, i))
+  const y2Slot = s.y2_color_slot == null ? null : Math.trunc(num(s.y2_color_slot, 0))
   const distance = num(s.distance_m, 0)
+  const wrap = (k: number) => ((k % PALETTE_SIZE) + PALETTE_SIZE) % PALETTE_SIZE
   return {
     label: str(s.label, `Series ${i + 1}`, 60),
-    color_slot: ((slot % PALETTE_SIZE) + PALETTE_SIZE) % PALETTE_SIZE,
+    color_slot: wrap(slot),
+    ...(y2Slot == null ? {} : { y2_color_slot: wrap(y2Slot) }),
     distance_m: distance > 0 ? distance : null,
     ...(TYPES.includes(s.activity_type as string)
       ? { activity_type: s.activity_type as SeriesConfig['activity_type'] }
@@ -94,6 +98,10 @@ function panel(value: unknown, i: number): PanelConfig {
     include_partial_laps: p.include_partial_laps === true,
     x: p.x === undefined ? { field: 'start_time', level: 'activity' } : axis(p.x, `${what} x axis`),
     y: axis(p.y, `${what} y axis`),
+    ...(p.y2 == null ? {} : { y2: axis(p.y2, `${what} right axis`) }),
+    ...(p.trend === true ? { trend: true } : {}),
+    ...(p.y2_trend === true ? { y2_trend: true } : {}),
+    ...(p.y2_line === undefined ? {} : { y2_line: oneOf(p.y2_line, LINES, 'dash', `${what} right axis line`) }),
     error: oneOf(p.error, ERRORS, 'none', `${what} error`),
     series: rawSeries.map(series),
     layout: {
