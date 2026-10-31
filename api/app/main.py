@@ -5,23 +5,39 @@ from functools import lru_cache
 from typing import Annotated, Literal
 
 import pandas as pd
-from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Path, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app.auth import current_user
+from app.auth import AccountDeleter, current_user, get_account_deleter
 from app.config import get_settings
 from app.models import (
     ActivityList,
     ActivitySummary,
     ClaimRequest,
     ClaimResponse,
+    DashboardsDocument,
     DateRange,
+    DeleteResponse,
     DisplayFilters,
     FieldCatalog,
     HealthResponse,
     LibrarySummary,
     QueryRequest,
     QueryResponse,
+    SaveDashboardsRequest,
+    SaveDashboardsResponse,
     SessionResponse,
     UploadCheckRequest,
     UploadCheckResponse,
@@ -30,7 +46,7 @@ from app.models import (
 from app.parsing.csv_parser import Units
 from app.parsing.schema import VISIBLE_TYPES
 from app.query import engine
-from app.storage.backends import GcsStorage, LocalStorage, Storage
+from app.storage.backends import GcsStorage, LocalStorage, PreconditionFailed, Storage
 from app.storage.data_store import DataStore
 from app.uploads import IncomingFile, is_known, process_upload
 
@@ -43,6 +59,8 @@ settings = get_settings()
 # used to build storage paths outside the session's prefix.
 SessionId = Annotated[str, Path(pattern=r"^[A-Za-z0-9_-]{32}$")]
 ActivityTypes = Annotated[list[Literal["run", "ride", "hike"]] | None, Query()]
+ActivityId = Annotated[str, Path(pattern=r"^act_[0-9a-f]{16}$")]
+DASHBOARDS = "dashboards.json"
 
 app = FastAPI(title="Dashboarder API", version="0.1.0")
 app.add_middleware(
@@ -175,6 +193,15 @@ def data_routes(get_store) -> APIRouter:
         ]
         return ActivityList(total=len(acts), items=items)
 
+    @router.delete("/activities/{activity_id}", status_code=204)
+    def delete_activity(store: Store, activity_id: ActivityId) -> Response:
+        """Delete one activity, its laps and records, and its original file if nothing else uses
+        it. Uploading that file again brings the activity back."""
+        if not store.delete_activity(activity_id):
+            raise HTTPException(404, "no such activity")
+        logger.info("deleted activity %s activity_id=%s", store.label, activity_id)
+        return Response(status_code=204)
+
     @router.get("/fields", response_model=FieldCatalog)
     def list_fields(store: Store, activity_type: ActivityTypes = None) -> FieldCatalog:
         return engine.field_catalog(store, list(activity_type or VISIBLE_TYPES))
@@ -189,6 +216,57 @@ def data_routes(get_store) -> APIRouter:
 
 app.include_router(data_routes(session_store), prefix="/sessions/{session_id}", tags=["guest"])
 app.include_router(data_routes(user_store), prefix="/me", tags=["signed in"])
+
+
+@app.delete("/sessions/{session_id}", response_model=DeleteResponse)
+def delete_session(store: Annotated[DataStore, Depends(session_store)]) -> DeleteResponse:
+    """Delete everything a guest session has stored."""
+    count = store.delete_all()
+    logger.info("deleted all data %s objects=%d", store.label, count)
+    return DeleteResponse(objects_deleted=count)
+
+
+@app.delete("/me", response_model=DeleteResponse)
+def delete_me(
+    uid: Annotated[str, Depends(current_user)],
+    store: Annotated[DataStore, Depends(user_store)],
+    delete_account: Annotated[AccountDeleter, Depends(get_account_deleter)],
+) -> DeleteResponse:
+    """Delete everything the user has stored, then the account itself.
+
+    Data goes first: if deleting the account then fails, nothing is left behind under it.
+    """
+    count = store.delete_all()
+    delete_account(uid)
+    logger.info("deleted account and all data %s objects=%d", store.label, count)
+    return DeleteResponse(objects_deleted=count)
+
+
+@app.get("/me/dashboards", response_model=DashboardsDocument)
+def get_dashboards(store: Annotated[DataStore, Depends(user_store)]) -> DashboardsDocument:
+    """The user's dashboards and settings, as last saved from any device."""
+    document, generation = store.read_document(DASHBOARDS)
+    return DashboardsDocument(document=document, generation=generation)
+
+
+@app.put("/me/dashboards", response_model=SaveDashboardsResponse,
+         responses={409: {"model": DashboardsDocument}})
+def save_dashboards(
+    body: SaveDashboardsRequest, store: Annotated[DataStore, Depends(user_store)]
+):
+    """Save dashboards and settings. Refused (409, with the current copy) if another device
+    saved since `base_generation`, so one device never silently overwrites another's changes."""
+    try:
+        generation = store.write_document(DASHBOARDS, body.document, body.base_generation)
+    except ValueError as exc:
+        raise HTTPException(413, str(exc)) from exc
+    except PreconditionFailed:
+        document, current = store.read_document(DASHBOARDS)
+        return JSONResponse(
+            status_code=409,
+            content=DashboardsDocument(document=document, generation=current).model_dump(),
+        )
+    return SaveDashboardsResponse(generation=generation)
 
 
 @app.post("/me/claim-session", response_model=ClaimResponse)

@@ -233,16 +233,45 @@ export function setAuthTokenGetter(getter: () => Promise<string | null>): void {
   tokenGetter = getter
 }
 
+export interface DashboardsDocument {
+  /** Dashboards and settings as the web app saved them; null before the first save. */
+  document: Record<string, unknown> | null
+  generation: number
+}
+
+export interface DeleteResponse {
+  objects_deleted: number
+}
+
+/** A failed API call, with its status and parsed body (e.g. the current copy on a 409). */
+export class ApiError extends Error {
+  status: number
+  body: unknown
+  constructor(message: string, status: number, body: unknown) {
+    super(message)
+    this.status = status
+    this.body = body
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await tokenGetter()
   const headers = new Headers(init?.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const resp = await fetch(`${BASE_URL}${path}`, { ...init, headers })
   if (!resp.ok) {
-    throw new Error(`${init?.method ?? 'GET'} ${path} failed: ${resp.status}`)
+    const body = await resp.json().catch(() => null)
+    throw new ApiError(`${init?.method ?? 'GET'} ${path} failed: ${resp.status}`, resp.status, body)
   }
+  if (resp.status === 204) return undefined as T
   return (await resp.json()) as T
 }
+
+const json = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+})
 
 export const api = {
   health: () => request<HealthResponse>('/health'),
@@ -275,6 +304,14 @@ export const api = {
     activityTypes.forEach((t) => qs.append('activity_type', t))
     return request<FieldCatalog>(`${scope}/fields?${qs}`)
   },
+  deleteActivity: (scope: Scope, activityId: string) =>
+    request<void>(`${scope}/activities/${activityId}`, { method: 'DELETE' }),
+  /** Deletes everything stored for the scope; for `/me`, the account too. */
+  deleteAll: (scope: Scope) => request<DeleteResponse>(scope, { method: 'DELETE' }),
+  getDashboards: () => request<DashboardsDocument>('/me/dashboards'),
+  /** Throws ApiError 409 (body: the current DashboardsDocument) if another device saved first. */
+  saveDashboards: (document: Record<string, unknown>, baseGeneration: number) =>
+    request<{ generation: number }>('/me/dashboards', json('PUT', { document, base_generation: baseGeneration })),
   claimSession: (sessionId: string) =>
     request<ClaimResponse>('/me/claim-session', {
       method: 'POST',

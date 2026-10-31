@@ -246,3 +246,41 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
 - **No backup codes:** losing the authenticator means an admin removes the factor (Firebase
   console or Admin SDK). Revisit if that becomes a burden.
 - The QR code is drawn with qrcode-generator (2.0.4), loaded only in the setup dialog.
+
+## 2026-10-31: Dashboard sync and deleting data (user storage, phase C)
+
+- **Dashboards and settings sync to the account** as one JSON document,
+  `users/{uid}/dashboards.json` (`GET`/`PUT /me/dashboards`, capped at 1 MB). The API treats it
+  as opaque; the web app validates it on load (keeping IDs, dropping only an unreadable
+  dashboard, clamping settings).
+- **Conflicts are refused, not merged.** A save carries the generation it was based on; if
+  another device saved since, the API answers 409 with the current copy, and the web app shows
+  that copy with a notice. Saves are debounced (0.8 s) and sent one at a time, and a save that
+  changes nothing is skipped. On a failed save, changes stay in the browser and the next change
+  retries.
+- **Per-owner browser caches**: guest dashboards keep the old localStorage keys; each account
+  gets `…:<uid>` keys, seeded from the guest's on its first sign-in in that browser. Signing out
+  never shows an account's dashboards to the next person.
+- **Generations must survive JSON in the browser.** GCS generations (~1.7e15) do; the local
+  backend's nanosecond mtimes (~1.8e18) didn't, which made every local save look stale. It now
+  uses microseconds. A test asserts generations stay below 2**53.
+- **Delete one activity** (`DELETE …/activities/{id}`, from the activity picker): removes its row,
+  laps, and records, and its original file once no other stored activity came from it (activity
+  rows now record `source_sha256`). The file is also dropped from the manifest, so uploading it
+  again brings the activity back. Rows stored before this change have no `source_sha256`, so their
+  originals stay until "delete all".
+- **Delete everything**: `DELETE /me` removes every object under the user's prefix (batched on
+  GCS), then the Firebase account; data goes first so a failure never leaves orphaned data.
+  Guests get `DELETE /sessions/{id}`. The Load Data tab's "Your data and privacy" section says what
+  is stored and offers this behind a type-DELETE confirmation.
+
+## 2026-10-31: Date axes span the chosen period
+
+- Date axes now cover the dashboard's period (last N days up to now, or a custom range's whole
+  days), not just the span of the data, widened only if a week or month bucket starts before it.
+  "All time" still fits the data. Plotly's Home (reset axes) button returns to that range.
+- **Charts are drawn with `Plotly.newPlot`, not `Plotly.react`.** Plotly records the "initial"
+  axis ranges on the first draw and `react` never re-records them, so Home kept returning to the
+  range from the first draw (the default "last 90 days").
+- With a single week or month on a period-wide axis, Plotly can't infer bar width and draws a
+  hairline; such bars get an explicit bucket-sized width.

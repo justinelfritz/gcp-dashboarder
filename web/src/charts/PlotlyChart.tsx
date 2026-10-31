@@ -9,7 +9,9 @@ export default function PlotlyChart({ figure, label }: { figure: Figure; label: 
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    void Plotly.react(el, figure.data, { ...figure.layout, autosize: true }, {
+    // newPlot, not react: Plotly's Home (reset axes) button returns to the ranges recorded on the
+    // first draw, and react never re-records them. Redrawing makes Home match the current period.
+    void Plotly.newPlot(el, figure.data, { ...figure.layout, autosize: true }, {
       displaylogo: false,
       responsive: true,
       modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d'],

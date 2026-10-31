@@ -6,7 +6,8 @@ import { useAuth } from './auth/useAuth'
 import AccountMenu from './components/AccountMenu'
 import DashboardView from './components/DashboardView'
 import UploadPanel from './components/UploadPanel'
-import { useDashboards, useSettings } from './dashboard/store'
+import { forgetOwner, useDashboards, useSettings } from './dashboard/store'
+import { useAccountSync } from './dashboard/sync'
 
 type ApiStatus = 'checking' | 'ok' | 'error'
 type Tab = 'dashboard' | 'data'
@@ -17,9 +18,13 @@ export default function App() {
   const [scope, setScope] = useState<Scope | null>(null)
   const [tab, setTab] = useState<Tab>('dashboard')
   const [refreshKey, setRefreshKey] = useState(0)
-  const store = useDashboards()
-  const [settings, setSettings] = useSettings()
+  // Bumped after a guest deletes their data, to start a fresh guest session.
+  const [guestEpoch, setGuestEpoch] = useState(0)
   const signedIn = auth.state.status === 'signed-in'
+  const owner = auth.state.status === 'signed-in' ? auth.state.user.uid : null
+  const store = useDashboards(owner)
+  const [settings, setSettings] = useSettings(owner)
+  const sync = useAccountSync(owner, store.saved, settings, store.replace, setSettings)
   // Until a new account finishes setup (verified email, authenticator), the app stays a guest.
   const authSettled = auth.state.status !== 'loading'
 
@@ -51,7 +56,19 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [apiStatus, authSettled, signedIn])
+  }, [apiStatus, authSettled, signedIn, guestEpoch])
+
+  const deletedAll = async () => {
+    setRefreshKey((k) => k + 1)
+    if (owner) {
+      forgetOwner(owner)
+      await auth.signOut() // the account is gone; drop the local sign-in too
+    } else {
+      forgetSession()
+      setScope(null)
+      setGuestEpoch((n) => n + 1)
+    }
+  }
 
   return (
     <>
@@ -73,6 +90,12 @@ export default function App() {
           </nav>
         )}
         <span className="spacer" />
+        {sync.status === 'saving' && <span className="status">Saving…</span>}
+        {sync.status === 'offline' && (
+          <span className="status status-error" title="Changes are kept in this browser and saved when the connection returns">
+            Dashboards not saved to account
+          </span>
+        )}
         <span className={`status status-${apiStatus}`} data-testid="api-status">
           {apiStatus === 'checking' && 'Connecting to API…'}
           {apiStatus === 'ok' && 'API connected'}
@@ -82,6 +105,12 @@ export default function App() {
       </header>
       <main>
         {signedIn && <ClaimGuestData onClaimed={() => setRefreshKey((k) => k + 1)} />}
+        {sync.notice && (
+          <div className="banner" role="status">
+            <p>{sync.notice}</p>
+            <button type="button" className="secondary" onClick={sync.dismissNotice}>OK</button>
+          </div>
+        )}
         {!scope ? (
           <p>Upload activity files to start building dashboards.</p>
         ) : tab === 'data' ? (
@@ -92,6 +121,7 @@ export default function App() {
             refreshKey={refreshKey}
             defaultUnits={settings.units}
             onUploaded={() => setRefreshKey((k) => k + 1)}
+            onDeletedAll={deletedAll}
           />
         ) : (
           <DashboardView

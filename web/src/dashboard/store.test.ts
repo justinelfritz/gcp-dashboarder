@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import { starterDashboard, toQueryRequest } from './model'
-import { DashboardImportError, exportDashboard, parseDashboard } from './store'
+import { DashboardImportError, exportDashboard, forgetOwner, fromAccountDocument, parseDashboard, toAccountDocument, useDashboards } from './store'
 import { DEFAULT_SETTINGS } from './types'
 
 describe('dashboard import/export', () => {
@@ -86,5 +87,45 @@ describe('toQueryRequest', () => {
       { label: '5k', filters: [{ field: 'distance_m', op: 'near', value: 5000 }] },
       { label: '10k', filters: [{ field: 'distance_m', op: 'near', value: 10000 }] },
     ])
+  })
+})
+
+describe('account documents', () => {
+  it('round-trip with IDs kept, dropping only the unreadable dashboard', () => {
+    const d = starterDashboard()
+    const doc = toAccountDocument({ activeId: d.id, dashboards: [d] }, { units: 'metric', distance_tolerance: 0.03 })
+    const broken = { ...doc, dashboards: [...doc.dashboards, { schema_version: 1, panels: [{ chart: 'pie' }] }] }
+    const back = fromAccountDocument(JSON.parse(JSON.stringify(broken)))!
+    expect(back.saved.activeId).toBe(d.id)
+    expect(back.saved.dashboards).toHaveLength(1)
+    expect(back.saved.dashboards[0].panels.map((p) => p.id)).toEqual(d.panels.map((p) => p.id))
+    expect(back.settings).toEqual({ units: 'metric', distance_tolerance: 0.03 })
+  })
+
+  it('rejects documents with nothing usable, and clamps settings', () => {
+    expect(fromAccountDocument(null)).toBeNull()
+    expect(fromAccountDocument({ schema_version: 2, dashboards: [] })).toBeNull()
+    const d = starterDashboard()
+    const odd = fromAccountDocument({ schema_version: 1, activeId: 'gone', dashboards: [d], settings: { units: 'furlongs', distance_tolerance: 9 } })!
+    expect(odd.saved.activeId).toBe(d.id)
+    expect(odd.settings).toEqual({ units: 'imperial', distance_tolerance: 0.5 })
+  })
+})
+
+describe('per-owner caches', () => {
+  afterEach(() => localStorage.clear())
+
+  it('keeps guest and account dashboards apart, seeding an account from the guest once', () => {
+    const { result, rerender } = renderHook(({ owner }) => useDashboards(owner), { initialProps: { owner: null as string | null } })
+    act(() => result.current.update({ ...result.current.active, name: 'Guest board' }))
+    rerender({ owner: 'alice' })
+    expect(result.current.active.name).toBe('Guest board') // first sign-in starts from the guest's
+    act(() => result.current.update({ ...result.current.active, name: 'Alice board' }))
+    rerender({ owner: null })
+    expect(result.current.active.name).toBe('Guest board') // signing out doesn't show Alice's
+    rerender({ owner: 'alice' })
+    expect(result.current.active.name).toBe('Alice board')
+    forgetOwner('alice')
+    expect(localStorage.getItem('dashboarder.dashboards:alice')).toBeNull()
   })
 })

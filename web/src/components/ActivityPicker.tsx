@@ -14,6 +14,8 @@ interface Props {
   settings: Settings
   onApply: (s: ActivitySelection) => void
   onCancel: () => void
+  /** Permanently delete a stored activity (not just leave it out of this dashboard). */
+  onDelete?: (activityId: string) => Promise<void>
 }
 
 /** The activity's local calendar date, YYYY-MM-DD. */
@@ -22,12 +24,30 @@ function localDay(a: ActivitySummary): string {
   return new Date(ms).toISOString().slice(0, 10)
 }
 
-export default function ActivityPicker({ activities, selection, settings, onApply, onCancel }: Props) {
+export default function ActivityPicker({ activities, selection, settings, onApply, onCancel, onDelete }: Props) {
   const [draft, setDraft] = useState<ActivitySelection>(selection ?? ALL_ACTIVITIES)
   const [search, setSearch] = useState('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const lastClicked = useRef<number | null>(null)
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const remove = async (a: ActivitySummary) => {
+    const ok = window.confirm(
+      `Permanently delete “${activityLabel(a)}” from storage, including its original file? ` +
+        'To only leave it out of this dashboard, uncheck it instead. Uploading the file again brings it back.',
+    )
+    if (!ok || !onDelete) return
+    setDeleting(a.activity_id)
+    setDeleteError(null)
+    try {
+      await onDelete(a.activity_id)
+    } catch {
+      setDeleteError(`Couldn’t delete “${activityLabel(a)}”. Try again.`)
+    } finally {
+      setDeleting(null)
+    }
+  }
   const dialogRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -137,6 +157,7 @@ export default function ActivityPicker({ activities, selection, settings, onAppl
                   <th>Sport</th>
                   <th className="num">Distance ({distUnit.label})</th>
                   <th className="num">Moving time</th>
+                  {onDelete && <th><span className="visually-hidden">Delete</span></th>}
                 </tr>
               </thead>
               <tbody>
@@ -163,6 +184,14 @@ export default function ActivityPicker({ activities, selection, settings, onAppl
                       <td>{SPORTS[a.activity_type] ?? a.activity_type}</td>
                       <td className="num">{a.distance_m == null ? '–' : (a.distance_m * distUnit.factor).toFixed(2)}</td>
                       <td className="num">{time == null ? '–' : formatClock(time)}</td>
+                      {onDelete && (
+                        <td>
+                          <button type="button" className="link danger" disabled={deleting !== null}
+                            aria-label={`Delete ${activityLabel(a)} permanently`} onClick={() => void remove(a)}>
+                            {deleting === a.activity_id ? 'Deleting…' : 'Delete'}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
@@ -171,6 +200,7 @@ export default function ActivityPicker({ activities, selection, settings, onAppl
           )}
         </div>
 
+        {deleteError && <p className="status status-error">{deleteError}</p>}
         <div className="modal-actions">
           <span className="status picker-count" aria-live="polite">
             {selectedCount} of {activities.length} selected{narrowed ? ` · ${shownSelected} of ${shown.length} shown` : ''}

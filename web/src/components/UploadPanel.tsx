@@ -18,7 +18,7 @@ type Status =
 
 const browserTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone
 
-export default function UploadPanel({ scope, signedIn = false, refreshKey = 0, defaultUnits = 'imperial', onUploaded }: {
+export default function UploadPanel({ scope, signedIn = false, refreshKey = 0, defaultUnits = 'imperial', onUploaded, onDeletedAll }: {
   scope: Scope
   /** Signed-in users' uploads are kept; a guest's expire. */
   signedIn?: boolean
@@ -26,6 +26,8 @@ export default function UploadPanel({ scope, signedIn = false, refreshKey = 0, d
   refreshKey?: number
   defaultUnits?: NonNullable<UploadOptions['units']>
   onUploaded?: () => void
+  /** Called after everything stored for this scope (and, signed in, the account) is deleted. */
+  onDeletedAll?: () => void | Promise<void>
 }) {
   const [status, setStatus] = useState<Status>({ step: 'idle' })
   const [units, setUnits] = useState<NonNullable<UploadOptions['units']>>(defaultUnits)
@@ -136,7 +138,76 @@ export default function UploadPanel({ scope, signedIn = false, refreshKey = 0, d
           </li>
         </ul>
       </details>
+      <DataAndPrivacy scope={scope} signedIn={signedIn} hasData={!!library?.activities} onDeleted={onDeletedAll} />
     </section>
+  )
+}
+
+function DataAndPrivacy({ scope, signedIn, hasData, onDeleted }: {
+  scope: Scope
+  signedIn: boolean
+  hasData: boolean
+  onDeleted?: () => void | Promise<void>
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const what = signedIn ? 'your account and everything stored in it' : 'everything uploaded from this browser'
+
+  const remove = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.deleteAll(scope)
+      setConfirming(false)
+      await onDeleted?.()
+    } catch {
+      setError('Deleting failed. Nothing was signed out; try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <details className="upload-help">
+      <summary>Your data and privacy</summary>
+      <p>
+        We store the files you upload (originals, which for GPS devices include your routes) and what we
+        compute from them: activity summaries, laps, and per-second data.
+        {signedIn
+          ? ' Signed in, it’s kept until you delete it, along with your dashboards and settings. Only your account can read it.'
+          : ' As a guest, it’s deleted 7 days after upload. Anyone with this browser’s session can read it.'}
+        {' '}Delete single activities from a dashboard’s activity list (the “All N activities” button).
+      </p>
+      {(signedIn || hasData) && (
+        <button type="button" className="danger" onClick={() => { setConfirming(true); setTyped('') }}>
+          {signedIn ? 'Delete my account and all data' : 'Delete all uploaded data'}
+        </button>
+      )}
+      {confirming && (
+        <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && setConfirming(false)}>
+          <div className="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+            <h2 id="delete-title">Delete {signedIn ? 'your account' : 'all data'}?</h2>
+            <form onSubmit={(e) => { e.preventDefault(); void remove() }}>
+              <p>
+                This permanently deletes {what}, including original files. It can’t be undone.
+                {signedIn && ' You’ll be signed out, and the account can’t be used again.'}
+              </p>
+              <label className="field">
+                Type DELETE to confirm
+                <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" />
+              </label>
+              {error && <p className="status status-error">{error}</p>}
+              <div className="modal-actions">
+                <button type="button" className="secondary" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
+                <button type="submit" className="danger" disabled={busy || typed !== 'DELETE'}>Delete permanently</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </details>
   )
 }
 

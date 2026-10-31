@@ -2,6 +2,7 @@
 import type { Data, Layout } from 'plotly.js'
 import type { ActivityType, AxisInfo, AxisSpec, PanelResult } from '../api/client'
 import { y2Slots, yAggregates } from '../dashboard/model'
+import type { DateWindow } from '../dashboard/model'
 import { LINE_STYLES } from '../dashboard/types'
 import type { PanelConfig, Settings } from '../dashboard/types'
 import type { ChartTheme } from './palette'
@@ -14,7 +15,11 @@ export interface FigureContext {
   theme: ChartTheme
   /** activity_id -> name, for tooltips and the table. */
   activityNames?: Map<string, string>
+  /** The dashboard's chosen period, so date axes (and the Home button) show all of it. */
+  dateWindow?: DateWindow
 }
+
+
 
 export interface Figure {
   data: Data[]
@@ -263,6 +268,7 @@ export function buildFigure(config: PanelConfig, result: PanelResult, ctx: Figur
     data.push(...buildTraces(config, result2, a2!, ctx,
       { axis: 'y2', trend: !!config.y2_trend, slots: y2Slots(config), secondary: true, named: true }, y2Values, xValues))
   }
+  if (isBar && a.xTime) fixLoneBarWidth(config, data)
 
   const axisBase = {
     gridcolor: theme.grid,
@@ -283,7 +289,7 @@ export function buildFigure(config: PanelConfig, result: PanelResult, ctx: Figur
   }
   if (a.xTime) {
     const all = two ? { ...result, series: [...result.series, ...result2.series] } : result
-    Object.assign(xaxis, { type: 'date', hoverformat: xHoverFormat(config) }, dateAxis(config, all))
+    Object.assign(xaxis, { type: 'date', hoverformat: xHoverFormat(config) }, dateAxis(config, all, ctx.dateWindow))
   } else if (a.xUnit?.format === 'clock' && xValues.length) {
     Object.assign(xaxis, clockAxis(xValues, false))
   }
@@ -320,6 +326,19 @@ export function buildFigure(config: PanelConfig, result: PanelResult, ctx: Figur
 
 const DAY_MS = 86_400_000
 
+/**
+ * Plotly sizes bars from the gap between neighbouring x values; with a single week or month
+ * there is none, and the bar shrinks to a hairline on a period-wide axis. Size it to the bucket.
+ */
+function fixLoneBarWidth(config: PanelConfig, data: Data[]): void {
+  const bucket = config.group_by === 'week' ? 7 * DAY_MS : config.group_by === 'month' ? 30.44 * DAY_MS : 0
+  const bars = data.filter((t) => (t as { type?: string }).type === 'bar') as { x: unknown[]; width?: number }[]
+  const positions = new Set(bars.flatMap((t) => t.x.map(String)))
+  if (!bucket || positions.size !== 1) return
+  // Same share of the bucket as the bar gap leaves elsewhere, split between grouped series.
+  for (const t of bars) t.width = (bucket * 0.65) / bars.length
+}
+
 // The API sends local wall-clock times without an offset, and Plotly plots date strings as wall
 // clock too. Do date math in UTC so the browser's own timezone never shifts anything.
 function wallClockMs(iso: string): number {
@@ -333,16 +352,22 @@ function wallClockIso(ms: number): string {
   return new Date(ms).toISOString().slice(0, 19).replace('T', ' ')
 }
 
-/** Date-axis range and ticks: a sensible minimum span, and ticks on week/month buckets. */
-function dateAxis(config: PanelConfig, result: PanelResult): Partial<Layout['xaxis']> {
+/**
+ * Date-axis range and ticks. The range covers the dashboard's chosen period (so a sparse "last 90
+ * days" still shows 90 days, and Plotly's Home button returns to it), widened if a week or month
+ * bucket starts before it. "All time" fits the data. Ticks sit on week/month buckets.
+ */
+function dateAxis(config: PanelConfig, result: PanelResult, window: DateWindow = {}): Partial<Layout['xaxis']> {
   const times = result.series.flatMap((s) => s.points.map((p) => wallClockMs(p.x as string)))
   if (!times.length) return {}
-  const min = Math.min(...times)
-  const max = Math.max(...times)
+  const first = Math.min(...times)
+  const last = Math.max(...times)
+  const min = Math.min(window.start ?? first, first)
+  const max = Math.max(window.end ?? last, last)
   if (config.group_by === 'week') {
     const weeks = Math.round((max - min) / (7 * DAY_MS)) + 1
     return {
-      tick0: wallClockIso(min),
+      tick0: wallClockIso(first),
       dtick: 7 * DAY_MS * Math.max(1, Math.ceil(weeks / 8)),
       tickformat: '%b %-d',
       range: [wallClockIso(min - 4 * DAY_MS), wallClockIso(max + 4 * DAY_MS)],
@@ -351,15 +376,18 @@ function dateAxis(config: PanelConfig, result: PanelResult): Partial<Layout['xax
   if (config.group_by === 'month') {
     const months = Math.round((max - min) / (30.44 * DAY_MS)) + 1
     return {
-      tick0: wallClockIso(min),
+      tick0: wallClockIso(first),
       dtick: `M${Math.max(1, Math.ceil(months / 8))}`,
       tickformat: '%b %Y',
       range: [wallClockIso(min - 16 * DAY_MS), wallClockIso(max + 16 * DAY_MS)],
     }
   }
-  // A single activity (or a few on one day) would otherwise zoom the axis to milliseconds.
+  // Pad the data's ends, but not an end the chosen period sets. Without padding, a single
+  // activity (or a few on one day) would zoom the axis to milliseconds.
   const pad = Math.max((max - min) * 0.04, max - min < 2 * DAY_MS ? 3 * DAY_MS : 0)
-  return { range: [wallClockIso(min - pad), wallClockIso(max + pad)] }
+  const lo = window.start === undefined ? min - pad : min
+  const hi = window.end === undefined ? max + pad : max
+  return { range: [wallClockIso(lo), wallClockIso(hi)] }
 }
 
 function clockAxis(values: number[], reversed: boolean): Partial<Layout['yaxis']> {

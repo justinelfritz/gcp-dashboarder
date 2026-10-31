@@ -31,7 +31,9 @@ RECORD_READ_THREADS = 16
 # When two sources describe the same activity, the higher priority one becomes the base row and
 # fills its gaps from the other (so a FIT file keeps the activity name from a Strava CSV).
 SOURCE_PRIORITY = {"fit": 2, "strava_csv": 1, "garmin_csv": 1}
-IDENTITY_COLUMNS = {"activity_id", "source_file", "source_format"}
+IDENTITY_COLUMNS = {"activity_id", "source_file", "source_format", "source_sha256"}
+# Dashboards and settings synced from the browser; small, so cap them.
+MAX_DOCUMENT_BYTES = 1_000_000
 
 
 @dataclass
@@ -78,20 +80,71 @@ class DataStore:
 
     def record_files(self, outcomes: dict[str, str]) -> None:
         """Add processed files to the manifest, so a later upload of the same bytes is skipped."""
-        if not outcomes:
-            return
+        if outcomes:
+            self._update_manifest(lambda m: {**m, **outcomes})
+
+    def _update_manifest(self, update: Callable[[dict], dict]) -> None:
         path = f"{self.prefix}/manifest.json"
         for _ in range(MERGE_ATTEMPTS):
             found = self.storage.read(path)
             manifest = json.loads(found[0]) if found else {}
-            manifest.update(outcomes)
             try:
-                self.storage.write(path, json.dumps(manifest).encode(), "application/json",
+                self.storage.write(path, json.dumps(update(manifest)).encode(), "application/json",
                                    if_generation=found[1] if found else 0)
                 return
             except PreconditionFailed:
                 continue
         raise RuntimeError("could not save the file manifest: too many concurrent uploads")
+
+    def delete_activity(self, activity_id: str) -> bool:
+        """Remove an activity: its row, laps, and records, and its original file once no other
+        stored activity came from that file. Returns False if there's no such activity.
+
+        The file is also dropped from the manifest, so uploading it again restores the activity.
+        """
+        if not (self.load_activities()["activity_id"] == activity_id).any():
+            return False
+        removed: list[dict] = []
+
+        def drop(rows: list[dict]) -> list[dict]:
+            removed.extend(r for r in rows if r["activity_id"] == activity_id)
+            return [r for r in rows if r["activity_id"] != activity_id]
+
+        self._update_parquet("activities.parquet", drop, activities_frame)
+        self._update_parquet(
+            "laps.parquet", lambda rows: [r for r in rows if r["activity_id"] != activity_id],
+            laps_frame,
+        )
+        self.storage.delete(self._path(f"records/{activity_id}.parquet"))
+        sha = removed[0].get("source_sha256") if removed else None
+        if isinstance(sha, str) and sha:
+            still_used = (self.load_activities()["source_sha256"] == sha).any()
+            if not still_used:
+                for path in self.storage.list(f"{self.prefix}/raw/"):
+                    if path.rsplit("/", 1)[1].startswith(sha):
+                        self.storage.delete(path)
+                self._update_manifest(lambda m: {k: v for k, v in m.items() if k != sha})
+        return True
+
+    def delete_all(self) -> int:
+        """Remove everything this owner has stored. Returns the number of objects removed."""
+        return self.storage.delete_prefix(f"{self.prefix}/")
+
+    def read_document(self, name: str) -> tuple[dict | None, int]:
+        """A small JSON document (e.g. dashboards) and its generation (0 if it doesn't exist)."""
+        found = self.storage.read(f"{self.prefix}/{name}")
+        return (json.loads(found[0]), found[1]) if found else (None, 0)
+
+    def write_document(self, name: str, document: dict, base_generation: int) -> int:
+        """Replace the document if it's still at `base_generation` (0: must not exist yet).
+
+        Raises PreconditionFailed if another device saved in between; returns the new generation.
+        """
+        data = json.dumps(document, separators=(",", ":")).encode()
+        if len(data) > MAX_DOCUMENT_BYTES:
+            raise ValueError(f"document is larger than {MAX_DOCUMENT_BYTES // 1000} KB")
+        return self.storage.write(f"{self.prefix}/{name}", data, "application/json",
+                                  if_generation=base_generation)
 
     def _path(self, name: str) -> str:
         return f"{self.prefix}/normalized/{name}"

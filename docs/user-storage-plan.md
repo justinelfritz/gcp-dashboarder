@@ -1,6 +1,6 @@
 # Plan: persistent user storage
 
-Status: phases A and B done (2026-10-31); C and D proposed. Decisions made so far: sign-in by email + password + authenticator app (TOTP) (changed
+Status: phases A–C done (2026-10-31); D proposed. Decisions made so far: sign-in by email + password + authenticator app (TOTP) (changed
 from email links), data kept until the
 user deletes it, and original files kept in cold storage.
 

@@ -8,10 +8,12 @@ import type { Settings } from '../dashboard/types'
 import DashboardView from './DashboardView'
 
 const query = vi.fn()
+const deleteActivity = vi.fn<(scope: string, id: string) => Promise<void>>(async () => {})
 
 vi.mock('../api/client', () => ({
   api: {
     query: (...args: unknown[]) => query(...args),
+    deleteActivity: (scope: string, id: string) => deleteActivity(scope, id),
     fields: async (): Promise<FieldCatalog> => ({
       total_activities: 10,
       levels: {
@@ -175,5 +177,24 @@ describe('DashboardView', () => {
       const last = query.mock.calls[query.mock.calls.length - 1][1] as QueryRequest
       expect(last.filters?.activity_ids?.sort()).toEqual(['a1', 'a3'])
     })
+  })
+
+  it('deletes a stored activity after confirming, then refetches', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    render(<Harness />)
+    await screen.findAllByTestId('chart')
+    fireEvent.click(await screen.findByText('All 3 activities'))
+    const dialog = await screen.findByRole('dialog')
+
+    confirm.mockReturnValueOnce(false)
+    fireEvent.click(within(dialog).getByLabelText('Delete Run 2 permanently'))
+    expect(deleteActivity).not.toHaveBeenCalled()
+
+    confirm.mockReturnValueOnce(true)
+    const queriesBefore = query.mock.calls.length
+    fireEvent.click(within(dialog).getByLabelText('Delete Run 2 permanently'))
+    await waitFor(() => expect(deleteActivity).toHaveBeenCalledWith('/sessions/s', 'a2'))
+    await waitFor(() => expect(query.mock.calls.length).toBeGreaterThan(queriesBefore))
+    confirm.mockRestore()
   })
 })

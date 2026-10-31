@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ActivityType } from '../api/client'
-import { isSelected, retitleForTypes, setSelected, starterDashboard, toDisplayFilters, upgradeStarterColors } from './model'
+import { dateWindow, isSelected, retitleForTypes, setSelected, starterDashboard, toDisplayFilters, upgradeStarterColors } from './model'
 import type { DashboardFilters } from './types'
 
 const base: DashboardFilters = { activity_types: ['run'], date_preset: 'all' }
@@ -82,5 +82,25 @@ describe('upgradeStarterColors', () => {
 
   it('returns current dashboards unchanged', () => {
     expect(upgradeStarterColors(fresh)).toBe(fresh)
+  })
+})
+
+describe('dateWindow', () => {
+  const now = new Date(Date.UTC(2026, 9, 30, 15, 0)) // Oct 30 2026 15:00 UTC
+  const wallNow = now.getTime() - now.getTimezoneOffset() * 60_000
+
+  it('covers the last N days up to now, in local wall-clock time', () => {
+    expect(dateWindow({ ...base, date_preset: 'last_30' }, now)).toEqual({ start: wallNow - 30 * 86_400_000, end: wallNow })
+  })
+
+  it('covers whole days of a custom range, and nothing for all time', () => {
+    expect(dateWindow({ ...base, date_preset: 'custom', start: '2026-09-01', end: '2026-09-30' }, now)).toEqual({
+      start: Date.parse('2026-09-01T00:00:00Z'), end: Date.parse('2026-10-01T00:00:00Z'),
+    })
+    expect(dateWindow({ ...base, date_preset: 'custom', start: '2026-09-01' }, now)).toEqual({
+      start: Date.parse('2026-09-01T00:00:00Z'), end: undefined,
+    })
+    expect(dateWindow({ ...base, date_preset: 'custom' }, now)).toBeUndefined()
+    expect(dateWindow({ ...base, date_preset: 'all' }, now)).toBeUndefined()
   })
 })

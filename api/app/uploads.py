@@ -83,6 +83,9 @@ def process_upload(
             result = _rejected(f"storage already holds the maximum of {store.max_files} files")
         else:
             result = _parse_one(f, timezone, units)
+            source = digest or content_hash(f.data)
+            for row in result.activities:
+                row["source_sha256"] = source
             if result.activities:
                 store.save_raw(f.data, _extension(f.filename) or "")
                 slots -= 1

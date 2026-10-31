@@ -6,7 +6,7 @@ import pytest
 from conftest import RUN_START, build_run
 from fastapi.testclient import TestClient
 
-from app.auth import get_token_verifier
+from app.auth import get_account_deleter, get_token_verifier
 from app.main import app, get_storage, settings
 from app.storage.backends import LocalStorage
 
@@ -129,3 +129,100 @@ def test_guest_routes_unchanged(client, run_fit):
     body = upload(client, f"/sessions/{sid}", ("run.fit", run_fit))
     assert body["total_activities"] == 1
     assert client.get(f"/sessions/{sid}/library").json()["activities"] == 1
+
+
+@pytest.fixture
+def deleted_accounts():
+    deleted: list[str] = []
+    app.dependency_overrides[get_account_deleter] = lambda: deleted.append
+    return deleted
+
+
+def test_delete_one_activity_and_bring_it_back(client, storage, run_fit):
+    later = build_run(start=RUN_START + timedelta(days=2))
+    upload(client, "/me", ("run.fit", run_fit), ("later.fit", later), headers=auth("alice"))
+    acts = client.get("/me/activities", headers=auth("alice")).json()["items"]
+    target = next(a for a in acts if a["start_time"].startswith(RUN_START.strftime("%Y-%m-%d")))
+
+    # Bob can't delete Alice's activity; bad IDs are refused.
+    bob = client.delete(f"/me/activities/{target['activity_id']}", headers=auth("bob"))
+    assert bob.status_code == 404
+    assert client.delete("/me/activities/../x", headers=auth("alice")).status_code in (404, 422)
+
+    resp = client.delete(f"/me/activities/{target['activity_id']}", headers=auth("alice"))
+    assert resp.status_code == 204
+    lib = client.get("/me/library", headers=auth("alice")).json()
+    assert lib["activities"] == 1 and lib["files_stored"] == 1
+    records = storage.list("users/alice/normalized/records/")
+    assert not any(target["activity_id"] in p for p in records)
+    run_hash = hashlib.sha256(run_fit).hexdigest()
+    known = client.post("/me/uploads/check", headers=auth("alice"), json={"hashes": [run_hash]})
+    assert known.json() == {"known": []}
+    assert client.delete(f"/me/activities/{target['activity_id']}",
+                         headers=auth("alice")).status_code == 404
+
+    # Uploading the file again restores it.
+    body = upload(client, "/me", ("run.fit", run_fit), headers=auth("alice"))
+    assert body["files"][0]["activities_added"] == 1
+
+
+def test_deleting_one_csv_activity_keeps_the_csv(client, storage):
+    from conftest import fixture_bytes
+
+    upload(client, "/me", ("garmin.csv", fixture_bytes("garmin_activities_metric.csv")),
+           headers=auth("alice"))
+    acts = client.get("/me/activities", headers=auth("alice")).json()["items"]
+    assert len(acts) > 1
+    client.delete(f"/me/activities/{acts[0]['activity_id']}", headers=auth("alice"))
+    assert len(storage.list("users/alice/raw/")) == 1  # other activities still come from it
+
+
+def test_delete_everything(client, storage, run_fit, deleted_accounts):
+    upload(client, "/me", ("run.fit", run_fit), headers=auth("alice"))
+    upload(client, "/me", ("run.fit", run_fit), headers=auth("bob"))
+    client.put("/me/dashboards", headers=auth("alice"), json={"document": {"dashboards": []}})
+    assert client.delete("/me").status_code == 401
+
+    resp = client.delete("/me", headers=auth("alice"))
+    assert resp.status_code == 200 and resp.json()["objects_deleted"] > 0
+    assert deleted_accounts == ["alice"]
+    assert storage.list("users/alice/") == []
+    assert storage.list("users/bob/")  # untouched
+
+
+def test_delete_guest_session(client, storage, run_fit):
+    sid = client.post("/sessions").json()["session_id"]
+    upload(client, f"/sessions/{sid}", ("run.fit", run_fit))
+    resp = client.delete(f"/sessions/{sid}")
+    assert resp.json()["objects_deleted"] > 0
+    assert storage.list(f"sessions/{sid}/") == []
+
+
+def test_dashboards_sync_refuses_stale_saves(client):
+    assert client.get("/me/dashboards").status_code == 401
+    assert client.get("/me/dashboards", headers=auth("alice")).json() == {
+        "document": None, "generation": 0}
+
+    first = client.put("/me/dashboards", headers=auth("alice"),
+                       json={"document": {"v": 1}, "base_generation": 0})
+    gen = first.json()["generation"]
+    assert first.status_code == 200 and gen > 0
+
+    # Another device, still on generation 0, can't overwrite it; it gets the current copy.
+    stale = client.put("/me/dashboards", headers=auth("alice"),
+                       json={"document": {"v": "other"}, "base_generation": 0})
+    assert stale.status_code == 409
+    assert stale.json() == {"document": {"v": 1}, "generation": gen}
+
+    # Generations go through JavaScript numbers in the browser: they must be exact there.
+    assert gen < 2**53
+    ok = client.put("/me/dashboards", headers=auth("alice"),
+                    json={"document": {"v": 2}, "base_generation": gen})
+    assert ok.status_code == 200
+    assert client.get("/me/dashboards", headers=auth("alice")).json()["document"] == {"v": 2}
+    assert client.get("/me/dashboards", headers=auth("bob")).json()["document"] is None
+
+    huge = client.put("/me/dashboards", headers=auth("alice"),
+                      json={"document": {"x": "a" * 1_100_000},
+                            "base_generation": ok.json()["generation"]})
+    assert huge.status_code == 413

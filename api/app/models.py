@@ -65,6 +65,27 @@ class ClaimResponse(BaseModel):
     total_activities: int
 
 
+class DashboardsDocument(BaseModel):
+    # The browser's dashboards and settings, opaque to the API (the web app validates them).
+    # None until the first save.
+    document: dict[str, Any] | None
+    # Pass back when saving; a save based on an older generation is refused (409).
+    generation: int
+
+
+class SaveDashboardsRequest(BaseModel):
+    document: dict[str, Any]
+    base_generation: int = 0  # 0: there was no saved document
+
+
+class SaveDashboardsResponse(BaseModel):
+    generation: int
+
+
+class DeleteResponse(BaseModel):
+    objects_deleted: int
+
+
 class LibrarySummary(BaseModel):
     activities: int  # every stored activity, including hidden types
     visible_activities: int  # outdoor runs, rides, and hikes

@@ -30,20 +30,33 @@ TokenVerifier = Callable[[str], dict]
 
 
 @lru_cache
-def _firebase_verifier() -> TokenVerifier:
+def _firebase_app():
     import firebase_admin
+
+    try:
+        return firebase_admin.get_app()
+    except ValueError:
+        return firebase_admin.initialize_app(
+            options={"projectId": get_settings().firebase_project_id}
+        )
+
+
+def _firebase_verifier() -> TokenVerifier:
     from firebase_admin import auth
 
-    project_id = get_settings().firebase_project_id
-    try:
-        app = firebase_admin.get_app()
-    except ValueError:
-        app = firebase_admin.initialize_app(options={"projectId": project_id})
+    app = _firebase_app()
+    return lambda token: auth.verify_id_token(token, app=app)
 
-    def verify(token: str) -> dict:
-        return auth.verify_id_token(token, app=app)
 
-    return verify
+AccountDeleter = Callable[[str], None]
+
+
+def get_account_deleter() -> AccountDeleter:
+    """UID -> deletes the Firebase account (sign-in identity). Overridden in tests."""
+    from firebase_admin import auth
+
+    app = _firebase_app()
+    return lambda uid: auth.delete_user(uid, app=app)
 
 
 def get_token_verifier() -> TokenVerifier:
