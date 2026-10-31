@@ -33,18 +33,18 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 ]
 
 interface Props {
-  sessionId: string
+  scope: string
   store: ReturnType<typeof useDashboards>
   settings: Settings
   onSettings: (s: Settings) => void
   refreshKey: number
 }
 
-export default function DashboardView({ sessionId, store, settings, onSettings, refreshKey }: Props) {
+export default function DashboardView({ scope, store, settings, onSettings, refreshKey }: Props) {
   const dashboard = store.active
-  const { results, loading, error } = usePanelResults(sessionId, dashboard, settings, refreshKey)
-  const catalog = useFieldCatalog(sessionId, dashboard.filters.activity_types, refreshKey)
-  const activities = useActivities(sessionId, dashboard.filters, refreshKey)
+  const { results, loading, error } = usePanelResults(scope, dashboard, settings, refreshKey)
+  const catalog = useFieldCatalog(scope, dashboard.filters.activity_types, refreshKey)
+  const activities = useActivities(scope, dashboard.filters, refreshKey)
   const activityNames = useMemo(
     () => new Map(activities.items.map((a) => [a.activity_id, activityLabel(a)])),
     [activities.items],

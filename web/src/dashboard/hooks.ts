@@ -14,7 +14,7 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
  * the query, so dragging or renaming a panel doesn't refetch. While loading, the previous
  * results stay on screen.
  */
-export function usePanelResults(sessionId: string, dashboard: Dashboard, settings: Settings, refreshKey: number) {
+export function usePanelResults(scope: string, dashboard: Dashboard, settings: Settings, refreshKey: number) {
   const [results, setResults] = useState<Map<string, PanelResult>>(new Map())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -30,7 +30,7 @@ export function usePanelResults(sessionId: string, dashboard: Dashboard, setting
     setLoading(true)
     const timer = setTimeout(() => {
       api
-        .query(sessionId, request)
+        .query(scope, request)
         .then((resp) => {
           if (cancelled) return
           setResults(new Map(resp.panels.map((p) => [p.id, p])))
@@ -43,24 +43,24 @@ export function usePanelResults(sessionId: string, dashboard: Dashboard, setting
       cancelled = true
       clearTimeout(timer)
     }
-  }, [sessionId, requestKey, refreshKey])
+  }, [scope, requestKey, refreshKey])
 
   return { results, loading, error }
 }
 
-export function useFieldCatalog(sessionId: string, activityTypes: ActivityType[], refreshKey: number) {
+export function useFieldCatalog(scope: string, activityTypes: ActivityType[], refreshKey: number) {
   const [catalog, setCatalog] = useState<FieldCatalog | null>(null)
   const typesKey = [...activityTypes].sort().join(',')
   useEffect(() => {
     let cancelled = false
     api
-      .fields(sessionId, typesKey ? (typesKey.split(',') as ActivityType[]) : [])
+      .fields(scope, typesKey ? (typesKey.split(',') as ActivityType[]) : [])
       .then((c) => !cancelled && setCatalog(c))
       .catch(() => !cancelled && setCatalog(null))
     return () => {
       cancelled = true
     }
-  }, [sessionId, typesKey, refreshKey])
+  }, [scope, typesKey, refreshKey])
   return catalog
 }
 
@@ -68,7 +68,7 @@ export function useFieldCatalog(sessionId: string, activityTypes: ActivityType[]
  * Every activity matching the dashboard's sport and date filters (ignoring the hand-picked
  * selection, which is chosen from this list), newest first.
  */
-export function useActivities(sessionId: string, filters: DashboardFilters, refreshKey: number) {
+export function useActivities(scope: string, filters: DashboardFilters, refreshKey: number) {
   const [items, setItems] = useState<ActivitySummary[]>([])
   const [loaded, setLoaded] = useState(false)
   const range = toDateRange(filters)
@@ -81,7 +81,7 @@ export function useActivities(sessionId: string, filters: DashboardFilters, refr
   useEffect(() => {
     let cancelled = false
     api
-      .activities(sessionId, { ...(JSON.parse(paramsKey) as ActivityListParams), limit: MAX_ACTIVITIES })
+      .activities(scope, { ...(JSON.parse(paramsKey) as ActivityListParams), limit: MAX_ACTIVITIES })
       .then((list) => {
         if (cancelled) return
         setItems(list.items)
@@ -91,7 +91,7 @@ export function useActivities(sessionId: string, filters: DashboardFilters, refr
     return () => {
       cancelled = true
     }
-  }, [sessionId, paramsKey, refreshKey])
+  }, [scope, paramsKey, refreshKey])
   return { items, loaded }
 }
 

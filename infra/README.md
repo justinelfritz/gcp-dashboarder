@@ -21,7 +21,7 @@ Optional variables: `REGION` (default `us-central1`), `RETENTION_DAYS` (default 
 | Resource | Name | Notes |
 |---|---|---|
 | Cloud Run service | `dashboarder-api-${ENV}` | Built from `api/` via Cloud Build. Min instances 0, max 5, 1 GiB, 4 concurrent requests per instance. Health check: `/health`. |
-| GCS bucket (private) | `${PROJECT_ID}-dashboarder-sessions-${ENV}` | Session data. Objects deleted after `RETENTION_DAYS`. |
+| GCS bucket (private) | `${PROJECT_ID}-dashboarder-sessions-${ENV}` | Session data. Objects under `sessions/` (guest data) are deleted after `RETENTION_DAYS`; nothing else expires. |
 | GCS bucket (public) | `${PROJECT_ID}-dashboarder-web-${ENV}` | Static frontend build. |
 
 ## Known limitations

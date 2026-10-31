@@ -66,7 +66,7 @@ function respond(req: QueryRequest): QueryResponse {
 function Harness({ initial = DEFAULT_SETTINGS }: { initial?: Settings }) {
   const store = useDashboards()
   const [settings, setSettings] = useState(initial)
-  return <DashboardView sessionId="s" store={store} settings={settings} onSettings={setSettings} refreshKey={0} />
+  return <DashboardView scope="/sessions/s" store={store} settings={settings} onSettings={setSettings} refreshKey={0} />
 }
 
 describe('DashboardView', () => {

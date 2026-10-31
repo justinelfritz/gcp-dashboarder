@@ -1,3 +1,4 @@
+import hashlib
 import io
 import secrets
 from datetime import timedelta
@@ -7,10 +8,11 @@ import pytest
 from conftest import RUN_START, build_run, fixture_bytes
 from fastapi.testclient import TestClient
 
+from app import uploads
 from app.main import app, get_storage, settings
 from app.parsing.fit_parser import parse_fit
 from app.storage.backends import LocalStorage, PreconditionFailed
-from app.storage.session_store import SessionStore, merge_rows
+from app.storage.data_store import DataStore, merge_rows
 
 
 @pytest.fixture
@@ -42,7 +44,7 @@ def upload(client, session_id, *files, **form):
 
 
 def activities(storage, session_id) -> pd.DataFrame:
-    return SessionStore(storage, session_id).load_activities()
+    return DataStore.for_session(storage, session_id, 5000).load_activities()
 
 
 def test_upload_garmin_csv_and_matching_fit_merges(client, storage, session_id, run_fit):
@@ -79,13 +81,69 @@ def test_strava_and_garmin_csv_dedupe(client, storage, session_id):
     assert body["total_activities"] == 7
 
 
-def test_reupload_is_idempotent(client, storage, session_id, run_fit):
+def test_reupload_is_skipped_by_content(client, storage, session_id, run_fit):
     upload(client, session_id, ("run.fit", run_fit))
-    body = upload(client, session_id, ("run.fit", run_fit))
-    assert body["files"][0]["activities_added"] == 0
-    assert body["files"][0]["duplicates_merged"] == 1
+    body = upload(client, session_id, ("renamed.fit", run_fit))
+    report = body["files"][0]
+    assert report["already_stored"] is True
+    assert report["activities_added"] == 0
     assert body["total_activities"] == 1
     assert len(storage.list(f"sessions/{session_id}/raw/")) == 1
+
+
+def test_same_activity_in_other_bytes_still_merges(client, session_id, run_fit):
+    upload(client, session_id, ("run.fit", run_fit))
+    # Different bytes (no per-second records) describing the same run: parsed, then merged.
+    body = upload(client, session_id, ("again.fit", build_run(with_records=False)))
+    assert body["files"][0]["already_stored"] is False
+    assert body["files"][0]["duplicates_merged"] == 1
+
+
+def test_upload_check_reports_known_hashes(client, session_id, run_fit):
+    run_hash = hashlib.sha256(run_fit).hexdigest()
+    bad = b"MZ not a fit file"
+    upload(client, session_id, ("run.fit", run_fit), ("bad.fit", bad), ("garmin.csv",
+           fixture_bytes("garmin_activities_metric.csv")))
+    other = "0" * 64
+    resp = client.post(f"/sessions/{session_id}/uploads/check",
+                       json={"hashes": [run_hash, other, run_hash, hashlib.sha256(bad).hexdigest()]})
+    # Rejected FIT files count as known too, so they aren't re-sent; CSVs are never recorded.
+    assert resp.json() == {"known": [run_hash, hashlib.sha256(bad).hexdigest()]}
+    bad_shape = client.post(f"/sessions/{session_id}/uploads/check", json={"hashes": ["xyz"]})
+    assert bad_shape.status_code == 422
+
+
+def test_rejections_are_retried_after_a_parser_change(client, storage, session_id, monkeypatch):
+    bad = b"MZ not a fit file"
+    upload(client, session_id, ("bad.fit", bad))
+    monkeypatch.setattr(uploads, "REJECTED", "rejected@999")
+    body = upload(client, session_id, ("bad.fit", bad))
+    assert body["files"][0]["already_stored"] is False
+    assert body["files"][0]["rejections"]
+
+
+def test_csv_reupload_is_parsed_again(client, session_id):
+    csv = fixture_bytes("garmin_activities_metric.csv")
+    upload(client, session_id, ("garmin.csv", csv), units="metric")
+    body = upload(client, session_id, ("garmin.csv", csv), units="metric")
+    assert body["files"][0]["already_stored"] is False
+    assert body["files"][0]["activities_parsed"] > 0
+
+
+def test_library_summary(client, session_id, run_fit):
+    empty = client.get(f"/sessions/{session_id}/library").json()
+    assert empty == {"activities": 0, "visible_activities": 0, "first_date": None,
+                     "last_date": None, "files_stored": 0, "bytes_stored": 0}
+    upload(client, session_id, ("run.fit", run_fit),
+           ("later.fit", build_run(start=RUN_START + timedelta(days=3))))
+    lib = client.get(f"/sessions/{session_id}/library").json()
+    assert lib["activities"] == 2
+    assert lib["visible_activities"] == 2
+    assert lib["files_stored"] == 2
+    assert lib["bytes_stored"] > 0
+    # RUN_START is 13:15 UTC, 07:15 local (UTC-6): the same calendar day.
+    assert lib["first_date"] == RUN_START.strftime("%Y-%m-%d")
+    assert lib["last_date"] == (RUN_START + timedelta(days=3)).strftime("%Y-%m-%d")
 
 
 def test_bad_files_are_reported_not_fatal(client, session_id, run_fit):
@@ -140,7 +198,7 @@ def test_merge_retries_on_concurrent_write(tmp_path, run_fit):
                 raise PreconditionFailed(path)
             super().write(path, data, content_type, if_generation)
 
-    store = SessionStore(FlakyStorage(str(tmp_path)), secrets.token_urlsafe(24))
+    store = DataStore.for_session(FlakyStorage(str(tmp_path)), secrets.token_urlsafe(24), 5000)
     outcome = store.merge_activities(parse_fit(run_fit, "run.fit").activities)
     assert outcome.total == 1
     assert len(store.load_activities()) == 1

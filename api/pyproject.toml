@@ -12,6 +12,7 @@ dependencies = [
     "pyarrow>=26.0.0",
     "garmin-fit-sdk>=21.218.0",
     "google-cloud-storage>=3.17.1",
+    "firebase-admin>=7.7.0",
 ]
 
 [dependency-groups]

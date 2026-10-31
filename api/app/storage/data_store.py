@@ -1,10 +1,14 @@
-"""Per-session data layout and activity merging.
+"""Stored activity data and activity merging, for one owner: a guest session or a user.
 
-sessions/{id}/raw/{sha}{ext}                    original uploads (named by content hash)
-sessions/{id}/normalized/activities.parquet     one row per activity
-sessions/{id}/normalized/laps.parquet           device laps and computed splits
-sessions/{id}/normalized/records/{activity}.parquet   second-by-second FIT data
-sessions/{id}/normalized/reports/{upload}.json  parse reports
+Every owner's data lives under its prefix, `sessions/{id}` (guests, deleted after a few days) or
+`users/{uid}` (signed-in users, kept until deleted):
+
+{prefix}/raw/{sha256}{ext}                 original uploads (named by content hash)
+{prefix}/manifest.json                     sha256 -> outcome for every FIT file seen
+{prefix}/normalized/activities.parquet     one row per activity
+{prefix}/normalized/laps.parquet           device laps and computed splits
+{prefix}/normalized/records/{activity}.parquet   second-by-second FIT data
+{prefix}/normalized/reports/{upload}.json  parse reports
 """
 
 import hashlib
@@ -37,18 +41,57 @@ class MergeOutcome:
     total: int
 
 
-class SessionStore:
-    def __init__(self, storage: Storage, session_id: str) -> None:
+class DataStore:
+    def __init__(self, storage: Storage, prefix: str, *, max_files: int, label: str) -> None:
         self.storage = storage
-        self.prefix = f"sessions/{session_id}"
+        self.prefix = prefix
+        # Most original files this owner may store.
+        self.max_files = max_files
+        # Identifies the owner in logs ("session=…" or "user=…"); never an email or file name.
+        self.label = label
+
+    @classmethod
+    def for_session(cls, storage: Storage, session_id: str, max_files: int) -> "DataStore":
+        return cls(storage, f"sessions/{session_id}", max_files=max_files,
+                   label=f"session={session_id}")
+
+    @classmethod
+    def for_user(cls, storage: Storage, uid: str, max_files: int) -> "DataStore":
+        return cls(storage, f"users/{uid}", max_files=max_files, label=f"user={uid}")
 
     def raw_file_count(self) -> int:
         return len(self.storage.list(f"{self.prefix}/raw/"))
 
+    def usage(self) -> tuple[int, int]:
+        """Objects and bytes stored for this owner, raw and normalized."""
+        return self.storage.usage(f"{self.prefix}/")
+
     def save_raw(self, data: bytes, extension: str) -> str:
-        path = f"{self.prefix}/raw/{hashlib.sha256(data).hexdigest()[:16]}{extension}"
+        path = f"{self.prefix}/raw/{content_hash(data)}{extension}"
         self.storage.write(path, data, "application/octet-stream")
         return path
+
+    def manifest(self) -> dict[str, str]:
+        """Content hash -> outcome ("stored" or "rejected@<parser version>") per FIT file processed."""
+        found = self.storage.read(f"{self.prefix}/manifest.json")
+        return json.loads(found[0]) if found else {}
+
+    def record_files(self, outcomes: dict[str, str]) -> None:
+        """Add processed files to the manifest, so a later upload of the same bytes is skipped."""
+        if not outcomes:
+            return
+        path = f"{self.prefix}/manifest.json"
+        for _ in range(MERGE_ATTEMPTS):
+            found = self.storage.read(path)
+            manifest = json.loads(found[0]) if found else {}
+            manifest.update(outcomes)
+            try:
+                self.storage.write(path, json.dumps(manifest).encode(), "application/json",
+                                   if_generation=found[1] if found else 0)
+                return
+            except PreconditionFailed:
+                continue
+        raise RuntimeError("could not save the file manifest: too many concurrent uploads")
 
     def _path(self, name: str) -> str:
         return f"{self.prefix}/normalized/{name}"
@@ -123,6 +166,44 @@ class SessionStore:
         self.storage.write(
             self._path(f"reports/{upload_id}.json"), json.dumps(report).encode(), "application/json"
         )
+
+    def copy_from(self, other: "DataStore") -> MergeOutcome | None:
+        """Merge another owner's activities into this one, e.g. a guest session claimed at sign-in.
+
+        Duplicates collapse exactly as in an upload. Laps and records come along for activities
+        whose row wins the merge, and original files up to this owner's file limit. The other
+        owner's data is left in place.
+        """
+        rows = other.load_activities().to_dict("records")
+        if not rows:
+            return None
+        outcome = self.merge_activities(rows)
+        winners = outcome.added
+        laps = other.load_laps()
+        self.save_laps({
+            aid: group.to_dict("records")
+            for aid, group in laps.groupby("activity_id") if aid in winners
+        })
+        for aid in winners:
+            found = self.storage.read(other._path(f"records/{aid}.parquet"))
+            if found:
+                self.storage.write(self._path(f"records/{aid}.parquet"), found[0], PARQUET)
+        have = {path.rsplit("/", 1)[1] for path in self.storage.list(f"{self.prefix}/raw/")}
+        slots = self.max_files - len(have)
+        for path in other.storage.list(f"{other.prefix}/raw/"):
+            name = path.rsplit("/", 1)[1]
+            if name in have or slots <= 0:
+                continue
+            found = other.storage.read(path)
+            if found:
+                self.storage.write(f"{self.prefix}/raw/{name}", found[0], "application/octet-stream")
+                slots -= 1
+        self.record_files(other.manifest())
+        return outcome
+
+
+def content_hash(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
 def merge_rows(existing: list[dict], new_rows: list[dict]) -> tuple[list[dict], MergeOutcome]:

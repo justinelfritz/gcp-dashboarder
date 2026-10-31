@@ -120,7 +120,6 @@ button.link:hover {
 .tabs {
   display: flex;
   gap: 0.25rem;
-  flex: 1;
 }
 
 .tab {
@@ -430,6 +429,10 @@ main {
   width: min(56rem, 100%);
 }
 
+.modal-narrow {
+  width: min(28rem, 100%);
+}
+
 /* ---- Activity picker ---- */
 
 .picker-note {
@@ -504,4 +507,84 @@ button:disabled {
     gap: 0.5rem 1rem;
     padding: 0.5rem 1rem;
   }
+}
+
+.library {
+  margin: 0.5rem 0 1rem;
+}
+
+.library p {
+  margin: 0.15rem 0;
+}
+
+.upload-help {
+  margin-top: 1.5rem;
+  color: var(--text-secondary);
+}
+
+.upload-help summary {
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+/* ---- Account ---- */
+
+.account {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.account-email {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16rem;
+}
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.banner p {
+  margin: 0;
+  flex: 1 1 18rem;
+}
+
+.qr {
+  display: flex;
+  justify-content: center;
+  min-height: 200px;
+  align-items: center;
+}
+
+/* The QR image carries its own white quiet zone, so it scans in dark mode too. */
+.qr img {
+  image-rendering: pixelated;
+  border-radius: 4px;
+}
+
+.code-input {
+  width: 9rem;
+  font-size: 1.4rem;
+  letter-spacing: 0.3em;
+  font-variant-numeric: tabular-nums;
+}
+
+.secret-key {
+  word-break: break-all;
+  user-select: all;
 }

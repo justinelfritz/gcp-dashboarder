@@ -30,7 +30,7 @@ from app.models import (
 from app.parsing.schema import VISIBLE_TYPES
 from app.parsing.segments import MOVING_SPEED_MPS
 from app.query import catalog
-from app.storage.session_store import SessionStore
+from app.storage.data_store import DataStore
 
 MAX_POINTS_PER_SERIES = 5000
 LEVEL_RANK = {"activity": 0, "lap": 1, "record": 2}
@@ -42,7 +42,7 @@ class QueryError(ValueError):
 
 @dataclass
 class Context:
-    store: SessionStore
+    store: DataStore
     activities: pd.DataFrame
     tolerance: float
     record_columns: set[str]
@@ -62,7 +62,7 @@ class Context:
         return self._records
 
 
-def run_query(store: SessionStore, req: QueryRequest, now: datetime | None = None) -> QueryResponse:
+def run_query(store: DataStore, req: QueryRequest, now: datetime | None = None) -> QueryResponse:
     activities = visible_activities(store.load_activities())
     try:
         activities = apply_display_filters(activities, req.filters, req.distance_tolerance, now)
@@ -359,7 +359,7 @@ def _x_info(panel: PanelQuery, x_field: catalog.Field) -> AxisInfo:
 
 # ---- Field catalog ----
 
-def field_catalog(store: SessionStore, activity_types: list[str]) -> FieldCatalog:
+def field_catalog(store: DataStore, activity_types: list[str]) -> FieldCatalog:
     """Every plottable field per level, with how many selected activities have data for it."""
     acts = visible_activities(store.load_activities())
     acts = acts[acts["activity_type"].isin(activity_types)]

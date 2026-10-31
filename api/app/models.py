@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel
 from pydantic import Field as PydanticField
@@ -30,12 +30,49 @@ class FileReport(BaseModel):
     rows_rejected: int
     rejections: list[RowIssue]
     warnings: list[str]
+    # The same bytes were processed by an earlier upload, so the file was skipped.
+    already_stored: bool = False
 
 
 class UploadResponse(BaseModel):
     upload_id: str
     files: list[FileReport]
     total_activities: int
+
+
+MAX_CHECK_HASHES = 10_000
+Sha256 = Annotated[str, PydanticField(pattern=r"^[0-9a-f]{64}$")]
+
+
+class UploadCheckRequest(BaseModel):
+    """SHA-256 hashes of files the browser is about to upload."""
+    hashes: list[Sha256] = PydanticField(max_length=MAX_CHECK_HASHES)
+
+
+class UploadCheckResponse(BaseModel):
+    # Hashes already processed by this session; uploading them again would change nothing.
+    known: list[str]
+
+
+class ClaimRequest(BaseModel):
+    # A guest session ID, shaped like the ones POST /sessions creates.
+    session_id: str = PydanticField(pattern=r"^[A-Za-z0-9_-]{32}$")
+
+
+class ClaimResponse(BaseModel):
+    activities_added: int
+    duplicates_merged: int
+    total_activities: int
+
+
+class LibrarySummary(BaseModel):
+    activities: int  # every stored activity, including hidden types
+    visible_activities: int  # outdoor runs, rides, and hikes
+    # Local calendar dates of the earliest and latest stored activities.
+    first_date: date | None
+    last_date: date | None
+    files_stored: int  # original uploaded files
+    bytes_stored: int  # originals plus processed data
 
 
 # ---- Activities and field catalog ----

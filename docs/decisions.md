@@ -178,3 +178,71 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
 - **Concurrency 4 per instance** (Cloud Run's default is 80). Queries are CPU- and memory-heavy
   pandas work in 1 vCPU / 1 GiB; a few large ones at once could exhaust memory, so Cloud Run
   starts another instance instead (up to the max of 5). Revisit after measuring real queries.
+
+## 2026-10-31: Upload only new files (user storage, phase A)
+
+- **Content-hash dedupe.** Each session keeps `manifest.json`, mapping a FIT file's SHA-256 to
+  its outcome. The browser hashes FIT files (Web Crypto), asks `POST …/uploads/check` which are
+  known, and uploads only the rest; the API also skips known hashes itself, so an old client
+  can't cause re-parsing. Re-uploading a full export now costs the hashing plus the new files.
+- **Only FIT files are deduped by content.** A CSV's meaning depends on the units and timezone
+  chosen at upload, so CSVs are always re-parsed (they're few and small); the activity merge
+  still keeps their rows from duplicating.
+- **Rejected FIT files are remembered too**, so non-activity files in an export aren't re-sent,
+  but tagged with the parser version (`rejected@1`). Bumping `FIT_PARSER_VERSION` makes them
+  eligible again.
+- Outcomes are written after the activities, laps, and records are saved, so a failed upload is
+  retried in full. Manifest writes use the same generation precondition as the parquet merges.
+- Raw files are now named by their full SHA-256 (was the first 16 hex digits).
+- `GET …/library` summarises what's stored: activity counts, first/latest local dates, original
+  files, and bytes. The Load Data tab shows it, plus guidance for adding new activities without
+  a full export (watch USB, per-activity "Export Original").
+- The bucket's 7-day deletion now applies only to `sessions/`, so data stored elsewhere (signed-in
+  users, phase B) is kept.
+
+## 2026-10-31: Accounts (user storage, phase B)
+
+(Sign-in method superseded the same day: see "Password + authenticator sign-in" below.)
+
+- **Firebase Authentication, passwordless email link.** The web app sends a link
+  (`sendSignInLinkToEmail`) and completes it on return; if the link is opened in another browser
+  it asks for the email again. The SDK is imported lazily and only when `VITE_FIREBASE_*` is set,
+  so guest-only builds never download it (about 50 KB gzipped when used).
+- **The API verifies ID tokens** with firebase-admin (`app/auth.py`). The UID comes only from the
+  verified token, and must match `^[A-Za-z0-9_-]{1,128}$` so it can't build paths outside the
+  user's prefix. With `DASHBOARDER_FIREBASE_PROJECT_ID` unset, `/me` routes answer 503 and the
+  app runs guest-only. Locally, `FIREBASE_AUTH_EMULATOR_HOST` makes it accept the Auth
+  emulator's tokens, so no Firebase project is needed.
+- **One set of data routes, two owners.** The upload, check, library, activities, fields, and
+  query routes are defined once and mounted at `/sessions/{id}` (guest) and `/me` (signed in).
+  `SessionStore` became `DataStore`, which takes a prefix: `sessions/{id}` or `users/{uid}`.
+  Limits differ: 5,000 original files per guest session, 20,000 per user.
+- **Guest data can be claimed.** After sign-in, if this browser has a guest session with data, a
+  banner offers to add it to the account (`POST /me/claim-session`). It merges exactly like an
+  upload (duplicates collapse), copies laps, records, originals, and the hash manifest, and leaves
+  the guest copy to expire. Activity IDs are deterministic, so hand-picked selections still match.
+- Dashboards and settings still live in the browser; syncing them is phase C. Signing out keeps
+  them, and starts a fresh guest session.
+
+## 2026-10-31: Password + authenticator sign-in (replaces email links)
+
+- The user didn't want emailed sign-in links (or emailed codes). Sign-in is now **email +
+  password, plus a code from an authenticator app (TOTP)**, both native to Firebase
+  Authentication (TOTP needs the project upgraded to Identity Platform). No custom code checking,
+  and no email sending of our own.
+- **The email address is the username**: Firebase password accounts are keyed by email, and a
+  separate username would need our own lookup table.
+- **Emails that remain** (both sent by Firebase, both links): a one-time verification at sign-up,
+  which Firebase requires before any second factor can be enrolled, and password reset on request.
+- **The API requires the second factor**: it rejects (403) tokens whose
+  `firebase.sign_in_second_factor` claim is empty, so a password alone reaches no data and a new
+  account can't be used until its authenticator is set up. The web app walks a new account
+  through: create (password ≥ 10 characters) → verify email → scan QR (or type the key) and
+  confirm a code. If the token after enrolling doesn't record the factor, the user is signed out
+  and asked to sign in with a code.
+- **Local development:** the Firebase Auth emulator can't do TOTP, so emulator runs set
+  `DASHBOARDER_REQUIRE_SECOND_FACTOR=false` and `VITE_REQUIRE_SECOND_FACTOR=false`. The TOTP step
+  itself is tested with a mocked SDK and must be checked against a real Firebase dev project.
+- **No backup codes:** losing the authenticator means an admin removes the factor (Firebase
+  console or Admin SDK). Revisit if that becomes a burden.
+- The QR code is drawn with qrcode-generator (2.0.4), loaded only in the setup dialog.

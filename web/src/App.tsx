@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
-import { api } from './api/client'
-import { getOrCreateSessionId } from './api/session'
+import { api, guestScope, USER_SCOPE } from './api/client'
+import type { Scope } from './api/client'
+import { forgetSession, getOrCreateSessionId, storedSessionId } from './api/session'
+import { useAuth } from './auth/useAuth'
+import AccountMenu from './components/AccountMenu'
 import DashboardView from './components/DashboardView'
 import UploadPanel from './components/UploadPanel'
 import { useDashboards, useSettings } from './dashboard/store'
@@ -10,38 +13,51 @@ type Tab = 'dashboard' | 'data'
 
 export default function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking')
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const auth = useAuth()
+  const [scope, setScope] = useState<Scope | null>(null)
   const [tab, setTab] = useState<Tab>('dashboard')
   const [refreshKey, setRefreshKey] = useState(0)
   const store = useDashboards()
   const [settings, setSettings] = useSettings()
+  const signedIn = auth.state.status === 'signed-in'
+  // Until a new account finishes setup (verified email, authenticator), the app stays a guest.
+  const authSettled = auth.state.status !== 'loading'
 
   useEffect(() => {
     let cancelled = false
     api
       .health()
-      .then(() => getOrCreateSessionId())
-      .then(async (id) => {
-        if (cancelled) return
-        setApiStatus('ok')
-        setSessionId(id)
-        // New sessions start on the upload screen.
-        const { total } = await api.activities(id, { limit: 1 })
-        if (!cancelled && total === 0) setTab('data')
-      })
-      .catch(() => {
-        if (!cancelled) setApiStatus('error')
-      })
+      .then(() => !cancelled && setApiStatus('ok'))
+      .catch(() => !cancelled && setApiStatus('error'))
     return () => {
       cancelled = true
     }
   }, [])
 
+  // Signed-in users read and write their account's data; everyone else gets a guest session.
+  useEffect(() => {
+    if (apiStatus !== 'ok' || !authSettled) return
+    let cancelled = false
+    const pick = signedIn ? Promise.resolve(USER_SCOPE) : getOrCreateSessionId().then(guestScope)
+    pick
+      .then(async (s) => {
+        if (cancelled) return
+        setScope(s)
+        // With nothing stored yet, start on the upload screen.
+        const { total } = await api.activities(s, { limit: 1 })
+        if (!cancelled && total === 0) setTab('data')
+      })
+      .catch(() => !cancelled && setApiStatus('error'))
+    return () => {
+      cancelled = true
+    }
+  }, [apiStatus, authSettled, signedIn])
+
   return (
     <>
       <header className="app-header">
         <h1>Custom Dashboarder</h1>
-        {sessionId && (
+        {scope && (
           <nav className="tabs" aria-label="Sections">
             {(['data', 'dashboard'] as const).map((t) => (
               <button
@@ -56,24 +72,31 @@ export default function App() {
             ))}
           </nav>
         )}
+        <span className="spacer" />
         <span className={`status status-${apiStatus}`} data-testid="api-status">
           {apiStatus === 'checking' && 'Connecting to API…'}
           {apiStatus === 'ok' && 'API connected'}
           {apiStatus === 'error' && 'API unavailable'}
         </span>
+        <AccountMenu auth={auth} />
       </header>
       <main>
-        {!sessionId ? (
+        {signedIn && <ClaimGuestData onClaimed={() => setRefreshKey((k) => k + 1)} />}
+        {!scope ? (
           <p>Upload activity files to start building dashboards.</p>
         ) : tab === 'data' ? (
           <UploadPanel
-            sessionId={sessionId}
+            key={scope}
+            scope={scope}
+            signedIn={signedIn}
+            refreshKey={refreshKey}
             defaultUnits={settings.units}
             onUploaded={() => setRefreshKey((k) => k + 1)}
           />
         ) : (
           <DashboardView
-            sessionId={sessionId}
+            key={scope}
+            scope={scope}
             store={store}
             settings={settings}
             onSettings={setSettings}
@@ -82,5 +105,71 @@ export default function App() {
         )}
       </main>
     </>
+  )
+}
+
+/**
+ * After sign-in, offer to move what this browser uploaded as a guest into the account, so signing
+ * in never loses an upload.
+ */
+function ClaimGuestData({ onClaimed }: { onClaimed: () => void }) {
+  const [guest] = useState(storedSessionId)
+  const [count, setCount] = useState(0)
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+  const [result, setResult] = useState('')
+
+  useEffect(() => {
+    if (!guest) return
+    let cancelled = false
+    api
+      .library(guestScope(guest))
+      .then((lib) => {
+        if (cancelled) return
+        if (lib.activities) setCount(lib.activities)
+        else forgetSession()
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [guest])
+
+  if (!guest || (!count && state !== 'done')) return null
+  const claim = async () => {
+    setState('busy')
+    try {
+      const r = await api.claimSession(guest)
+      forgetSession()
+      setResult(
+        `Added ${r.activities_added} activities to your account` +
+          (r.duplicates_merged ? ` (${r.duplicates_merged} were already there).` : '.'),
+      )
+      setState('done')
+      onClaimed()
+    } catch {
+      setState('error')
+    }
+  }
+  const discard = () => {
+    forgetSession()
+    setCount(0)
+  }
+  return (
+    <div className="banner" role="status">
+      {state === 'done' ? (
+        <p>{result}</p>
+      ) : (
+        <>
+          <p>
+            This browser has {count} activities uploaded before you signed in. Add them to your account?
+            {state === 'error' && <span className="status-error"> That didn't work; try again.</span>}
+          </p>
+          <button type="button" disabled={state === 'busy'} onClick={() => void claim()}>Add to my account</button>
+          <button type="button" className="secondary" disabled={state === 'busy'} onClick={discard}>
+            No, leave them
+          </button>
+        </>
+      )}
+    </div>
   )
 }

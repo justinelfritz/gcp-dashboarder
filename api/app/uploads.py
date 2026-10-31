@@ -8,11 +8,19 @@ from app.models import FileReport, RowIssue, UploadResponse
 from app.parsing.csv_parser import Units, parse_csv
 from app.parsing.fit_parser import is_fit, is_gzip, parse_fit
 from app.parsing.schema import ParseResult, RowError
-from app.storage.session_store import SessionStore
+from app.storage.data_store import DataStore, content_hash
 
 logger = logging.getLogger("dashboarder.uploads")
 
 ALLOWED_EXTENSIONS = (".fit.gz", ".fit", ".csv")
+# Bump when the FIT parser changes what it accepts, so files it rejected get another try.
+FIT_PARSER_VERSION = 1
+REJECTED = f"rejected@{FIT_PARSER_VERSION}"
+
+
+def is_known(outcome: str | None) -> bool:
+    """True when a FIT file with this manifest outcome needs no re-processing."""
+    return outcome in ("stored", REJECTED)
 MAX_REPORTED_REJECTIONS = 50
 
 
@@ -47,29 +55,39 @@ def _rejected(reason: str) -> ParseResult:
 
 
 def process_upload(
-    store: SessionStore,
+    store: DataStore,
     files: list[IncomingFile],
     *,
     timezone: str | None,
     units: Units,
     max_file_bytes: int,
-    max_files_per_session: int,
-    session_id: str,
 ) -> UploadResponse:
     upload_id = "up_" + secrets.token_hex(8)
-    slots = max_files_per_session - store.raw_file_count()
+    slots = store.max_files - store.raw_file_count()
+    seen = store.manifest()
+    outcomes: dict[str, str] = {}
 
     parsed: list[tuple[IncomingFile, ParseResult]] = []
-    for f in files:
-        if f.too_large:
+    known: set[int] = set()
+    for i, f in enumerate(files):
+        # Only FIT files are skipped by content: a CSV's meaning depends on the units and timezone
+        # chosen at upload, so re-uploading one with other settings must re-parse it.
+        is_fit_file = _extension(f.filename) in (".fit", ".fit.gz")
+        digest = content_hash(f.data) if is_fit_file and not f.too_large else None
+        if digest and (is_known(seen.get(digest)) or digest in outcomes):
+            known.add(i)
+            result = ParseResult(source_format="fit")
+        elif f.too_large:
             result = _rejected(f"file exceeds {max_file_bytes // (1024 * 1024)} MB limit")
         elif slots <= 0:
-            result = _rejected(f"session already has the maximum of {max_files_per_session} files")
+            result = _rejected(f"storage already holds the maximum of {store.max_files} files")
         else:
             result = _parse_one(f, timezone, units)
             if result.activities:
                 store.save_raw(f.data, _extension(f.filename) or "")
                 slots -= 1
+            if digest:
+                outcomes[digest] = "stored" if result.activities else REJECTED
         parsed.append((f, result))
 
     all_rows = [a for _, r in parsed for a in r.activities]
@@ -82,7 +100,7 @@ def process_upload(
         aid: rows for _, r in parsed for aid, rows in r.laps.items() if aid in winners
     })
     reports = []
-    for f, result in parsed:
+    for i, (f, result) in enumerate(parsed):
         for activity_id, rows in result.records.items():
             if activity_id in winners:
                 store.save_records(activity_id, rows)
@@ -100,16 +118,19 @@ def process_upload(
                 :MAX_REPORTED_REJECTIONS
             ],
             warnings=result.warnings,
+            already_stored=i in known,
         )
         reports.append(report)
         # Never log file contents or names; sizes and counts only.
         logger.info(
-            "parsed file session_id=%s upload_id=%s size=%d format=%s parsed=%d added=%d "
-            "rejected=%d",
-            session_id, upload_id, report.size_bytes, report.detected_format,
+            "parsed file %s upload_id=%s size=%d format=%s parsed=%d added=%d rejected=%d",
+            store.label, upload_id, report.size_bytes, report.detected_format,
             report.activities_parsed, report.activities_added, report.rows_rejected,
         )
 
+    # Record outcomes only after the activities, laps, and records are saved, so a failed upload
+    # is retried in full rather than skipped.
+    store.record_files(outcomes)
     total = outcome.total if outcome else len(store.load_activities())
     response = UploadResponse(upload_id=upload_id, files=reports, total_activities=total)
     store.save_report(upload_id, response.model_dump())

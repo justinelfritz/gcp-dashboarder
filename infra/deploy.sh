@@ -21,14 +21,17 @@ echo "==> Enabling APIs"
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
   artifactregistry.googleapis.com storage.googleapis.com
 
-echo "==> Session bucket gs://${SESSION_BUCKET} (private, ${RETENTION_DAYS}-day lifecycle)"
+echo "==> Session bucket gs://${SESSION_BUCKET} (private, guest sessions/ kept ${RETENTION_DAYS} days)"
 if ! gcloud storage buckets describe "gs://${SESSION_BUCKET}" >/dev/null 2>&1; then
   gcloud storage buckets create "gs://${SESSION_BUCKET}" --location="$REGION" \
     --uniform-bucket-level-access --public-access-prevention
 fi
+# Only anonymous guest data expires. Anything stored outside sessions/ (signed-in users' data,
+# later) is kept until the user deletes it.
 LIFECYCLE="$(mktemp)"
 cat >"$LIFECYCLE" <<EOF
-{"rule": [{"action": {"type": "Delete"}, "condition": {"age": ${RETENTION_DAYS}}}]}
+{"rule": [{"action": {"type": "Delete"},
+           "condition": {"age": ${RETENTION_DAYS}, "matchesPrefix": ["sessions/"]}}]}
 EOF
 gcloud storage buckets update "gs://${SESSION_BUCKET}" --lifecycle-file="$LIFECYCLE"
 rm -f "$LIFECYCLE"

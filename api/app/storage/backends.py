@@ -23,6 +23,10 @@ class Storage(Protocol):
 
     def list(self, prefix: str) -> list[str]: ...
 
+    def usage(self, prefix: str) -> tuple[int, int]:
+        """Object count and total bytes under the prefix."""
+        ...
+
 
 class LocalStorage:
     def __init__(self, root: str) -> None:
@@ -60,6 +64,11 @@ class LocalStorage:
             return []
         return sorted(str(p.relative_to(self.root)) for p in base.rglob("*") if p.is_file())
 
+    def usage(self, prefix: str) -> tuple[int, int]:
+        base = self._resolve(prefix)
+        files = [p for p in base.rglob("*") if p.is_file()] if base.exists() else []
+        return len(files), sum(p.stat().st_size for p in files)
+
 
 class GcsStorage:
     def __init__(self, bucket: str) -> None:
@@ -87,3 +96,7 @@ class GcsStorage:
 
     def list(self, prefix: str) -> list[str]:
         return [b.name for b in self._client.list_blobs(self._bucket, prefix=prefix)]
+
+    def usage(self, prefix: str) -> tuple[int, int]:
+        blobs = list(self._client.list_blobs(self._bucket, prefix=prefix))
+        return len(blobs), sum(b.size or 0 for b in blobs)
