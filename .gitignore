@@ -31,3 +31,9 @@ firebase-export-*/
 *service-account*.json
 *-credentials.json
 application_default_credentials.json
+*-key.json
+*_key.json
+*.pem
+*.key
+*.p12
+*.pfx
