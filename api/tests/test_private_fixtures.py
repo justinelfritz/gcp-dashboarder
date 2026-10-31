@@ -12,7 +12,7 @@ import pytest
 
 from app.parsing.csv_parser import parse_csv
 from app.parsing.fit_parser import parse_fit
-from app.storage.session_store import merge_rows
+from app.storage.data_store import merge_rows
 
 PRIVATE = Path(__file__).parent / "fixtures" / "private"
 TIMEZONE = os.environ.get("PRIVATE_FIXTURE_TZ", "America/New_York")

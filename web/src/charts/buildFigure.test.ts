@@ -85,6 +85,19 @@ describe('buildFigure', () => {
     expect(layout.yaxis?.rangemode).toBe('tozero')
     expect(layout.yaxis?.title).toMatchObject({ text: 'Total distance (mi)' })
   })
+
+  it('gives a lone weekly bar a week-sized width', () => {
+    const weekly: PanelConfig = { ...blankPanel(0), chart: 'bar', group_by: 'week' }
+    const one: PanelResult = {
+      ...paceResult,
+      x: { field: 'week', label: 'Week', unit: 'date', kind: 'datetime' },
+      series: [{ label: 'All', color: null, n_activities: 1, points: [{ x: '2026-10-19', y: 1, error: null, n: 1, activity_id: null }] }],
+    }
+    const width = (r: PanelResult) => (buildFigure(weekly, r, ctx).data[0] as { width?: number }).width
+    expect(width(one)).toBeCloseTo(7 * 86_400_000 * 0.65)
+    const two = { ...one, series: [{ ...one.series[0], points: [...one.series[0].points, { ...one.series[0].points[0], x: '2026-10-26' }] }] }
+    expect(width(two)).toBeUndefined() // Plotly sizes it from the spacing
+  })
 })
 
 describe('date axes', () => {
@@ -239,5 +252,34 @@ describe('trendlines', () => {
     const trends = all.filter((t) => t.name.endsWith('trend'))
     expect(trends.map((t) => [t.name, t.yaxis])).toEqual([['5k · Average heart rate trend', 'y2']])
     expect(trendNotes(hrPanel, paceResult, ctx, hrResult)).toEqual(['5k · Average heart rate trend: +7 bpm per week (r² 1.00)'])
+  })
+})
+
+describe('date axes follow the chosen period', () => {
+  const day = (d: string) => Date.parse(`${d}T00:00:00Z`)
+
+  it('spans the whole period even when activities are sparse', () => {
+    const window = { start: day('2026-08-01'), end: day('2026-10-30') }
+    const { layout } = buildFigure(pacePanel, paceResult, { ...ctx, dateWindow: window })
+    expect(layout.xaxis?.range).toEqual(['2026-08-01 00:00:00', '2026-10-30 00:00:00'])
+  })
+
+  it('pads only the open end of a half-open custom range', () => {
+    const { layout } = buildFigure(pacePanel, paceResult, { ...ctx, dateWindow: { start: day('2026-09-01') } })
+    const [lo, hi] = layout.xaxis?.range as string[]
+    expect(lo).toBe('2026-09-01 00:00:00')
+    expect(hi > '2026-09-19 08:00:00').toBe(true)
+  })
+
+  it('widens to a week bucket that starts before the period', () => {
+    const weekly: PanelConfig = { ...blankPanel(0), chart: 'bar', group_by: 'week' }
+    const result: PanelResult = {
+      ...paceResult,
+      x: { field: 'week', label: 'Week', unit: 'date', kind: 'datetime' },
+      series: [{ label: 'All', color: null, n_activities: 1, points: [{ x: '2026-08-31', y: 1, error: null, n: 1, activity_id: null }] }],
+    }
+    const { layout } = buildFigure(weekly, result, { ...ctx, dateWindow: { start: day('2026-09-02'), end: day('2026-10-01') } })
+    // Monday Aug 31 is before the Sep 2 start, so the axis starts at that bucket (minus padding).
+    expect(layout.xaxis?.range).toEqual(['2026-08-27 00:00:00', '2026-10-05 00:00:00'])
   })
 })

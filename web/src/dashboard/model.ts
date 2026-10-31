@@ -17,6 +17,32 @@ export function toDateRange(f: DashboardFilters): DateRange | undefined {
   return undefined
 }
 
+const DAY_MS = 86_400_000
+
+/**
+ * A period as wall-clock times in ms, treated as UTC (the same convention as the API's local
+ * dates). Either end may be open, e.g. a custom range with only a start date.
+ */
+export interface DateWindow {
+  start?: number
+  end?: number
+}
+
+/**
+ * The chosen period as wall-clock ms (local time treated as UTC, as the charts plot dates):
+ * the last N×24 hours up to now (as the API filters), or a custom range's whole days.
+ * Undefined for "all time".
+ */
+export function dateWindow(f: DashboardFilters, now: Date = new Date()): DateWindow | undefined {
+  const wallNow = now.getTime() - now.getTimezoneOffset() * 60_000
+  if (f.date_preset in PRESET_DAYS) return { start: wallNow - PRESET_DAYS[f.date_preset] * DAY_MS, end: wallNow }
+  if (f.date_preset !== 'custom') return undefined
+  const day = (d: string | undefined) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(`${d}T00:00:00Z`) : undefined)
+  const start = day(f.start)
+  const end = day(f.end)
+  return start === undefined && end === undefined ? undefined : { start, end: end === undefined ? undefined : end + DAY_MS }
+}
+
 export function toDisplayFilters(f: DashboardFilters): DisplayFilters {
   const out: DisplayFilters = { activity_types: f.activity_types, date_range: toDateRange(f) }
   const sel = f.selection

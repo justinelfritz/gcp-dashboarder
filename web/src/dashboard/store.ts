@@ -7,7 +7,7 @@ import type { ActivitySelection, Dashboard, PanelConfig, SeriesConfig, Settings 
 const DASHBOARDS_KEY = 'dashboarder.dashboards'
 const SETTINGS_KEY = 'dashboarder.settings'
 
-interface Saved {
+export interface Saved {
   activeId: string
   dashboards: Dashboard[]
 }
@@ -84,13 +84,20 @@ function series(value: unknown, i: number): SeriesConfig {
   }
 }
 
-function panel(value: unknown, i: number): PanelConfig {
+const ID_PATTERN = /^[a-z]+_[a-z0-9]{1,24}$/
+
+/** Keep a stored ID when syncing (other state refers to it); imports always get fresh ones. */
+function idFor(value: unknown, prefix: string, keepIds: boolean): string {
+  return keepIds && typeof value === 'string' && ID_PATTERN.test(value) ? value : newId(prefix)
+}
+
+function panel(value: unknown, i: number, keepIds = false): PanelConfig {
   const p = (value ?? {}) as Record<string, unknown>
   const what = `panel ${i + 1}`
   const layout = (p.layout ?? {}) as Record<string, unknown>
   const rawSeries = Array.isArray(p.series) && p.series.length ? p.series.slice(0, PALETTE_SIZE) : [{}]
   return {
-    id: newId('p'),
+    id: idFor(p.id, 'p', keepIds),
     title: str(p.title, `Panel ${i + 1}`, 120),
     chart: oneOf(p.chart, CHARTS, 'line', `${what} chart`),
     group_by: oneOf(p.group_by, GROUPS, 'activity', `${what} group_by`),
@@ -122,13 +129,18 @@ function selection(value: unknown): ActivitySelection | undefined {
 
 /** Validate an imported dashboard. Unknown keys are dropped; IDs are regenerated. */
 export function parseDashboard(json: string): Dashboard {
-  let data: Record<string, unknown>
+  let data: unknown
   try {
     data = JSON.parse(json)
   } catch {
     throw new DashboardImportError('not valid JSON')
   }
-  if (typeof data !== 'object' || data === null) throw new DashboardImportError('not a dashboard')
+  return dashboardFrom(data, false)
+}
+
+function dashboardFrom(value: unknown, keepIds: boolean): Dashboard {
+  if (typeof value !== 'object' || value === null) throw new DashboardImportError('not a dashboard')
+  const data = value as Record<string, unknown>
   if (data.schema_version !== SCHEMA_VERSION) {
     throw new DashboardImportError(`unsupported schema_version ${JSON.stringify(data.schema_version)}`)
   }
@@ -139,7 +151,7 @@ export function parseDashboard(json: string): Dashboard {
   if (!Array.isArray(data.panels)) throw new DashboardImportError('missing panels')
   return {
     schema_version: SCHEMA_VERSION,
-    id: newId('dash'),
+    id: idFor(data.id, 'dash', keepIds),
     name: str(data.name, 'Imported dashboard', 80),
     filters: {
       activity_types: types.length ? types : ['run'],
@@ -148,7 +160,48 @@ export function parseDashboard(json: string): Dashboard {
       end: typeof filters.end === 'string' ? filters.end : undefined,
       ...(filters.selection !== undefined ? { selection: selection(filters.selection) } : {}),
     },
-    panels: data.panels.slice(0, 24).map(panel),
+    panels: data.panels.slice(0, 24).map((p, i) => panel(p, i, keepIds)),
+  }
+}
+
+/** Dashboards and settings as stored in a signed-in user's account (`/me/dashboards`). */
+export interface AccountDocument {
+  schema_version: typeof SCHEMA_VERSION
+  activeId: string
+  dashboards: Dashboard[]
+  settings: Settings
+}
+
+export function toAccountDocument(saved: Saved, settings: Settings): AccountDocument {
+  return { schema_version: SCHEMA_VERSION, activeId: saved.activeId, dashboards: saved.dashboards, settings }
+}
+
+/**
+ * Validate a synced account document, keeping IDs. A dashboard that fails validation is dropped
+ * rather than losing the rest; returns null if nothing usable is left.
+ */
+export function fromAccountDocument(doc: unknown): { saved: Saved; settings: Settings } | null {
+  if (typeof doc !== 'object' || doc === null) return null
+  const d = doc as Record<string, unknown>
+  if (d.schema_version !== SCHEMA_VERSION || !Array.isArray(d.dashboards)) return null
+  const dashboards = d.dashboards.flatMap((x) => {
+    try {
+      return [dashboardFrom(x, true)]
+    } catch {
+      return []
+    }
+  })
+  if (!dashboards.length) return null
+  const activeId = dashboards.some((x) => x.id === d.activeId) ? (d.activeId as string) : dashboards[0].id
+  return { saved: { activeId, dashboards }, settings: settingsFrom(d.settings) }
+}
+
+function settingsFrom(value: unknown): Settings {
+  const s = (value ?? {}) as Record<string, unknown>
+  const tolerance = num(s.distance_tolerance, DEFAULT_SETTINGS.distance_tolerance)
+  return {
+    units: s.units === 'metric' || s.units === 'imperial' ? s.units : DEFAULT_SETTINGS.units,
+    distance_tolerance: Math.min(0.5, Math.max(0, tolerance)),
   }
 }
 
@@ -156,8 +209,13 @@ export function exportDashboard(d: Dashboard): string {
   return JSON.stringify(d, null, 2)
 }
 
-function loadSaved(): Saved {
-  const saved = read<Saved>(DASHBOARDS_KEY)
+// Each owner has its own copy in this browser: the guest's, and a cache per signed-in account,
+// so signing out never shows an account's dashboards to the next person.
+const keyFor = (base: string, owner: string | null) => (owner ? `${base}:${owner}` : base)
+
+/** An account's cached dashboards; on its first sign-in here, start from the guest's. */
+function loadSaved(owner: string | null): Saved {
+  const saved = read<Saved>(keyFor(DASHBOARDS_KEY, owner)) ?? (owner ? read<Saved>(DASHBOARDS_KEY) : null)
   const valid = saved?.dashboards?.filter((d) => d?.schema_version === SCHEMA_VERSION) ?? []
   if (valid.length) {
     const activeId = valid.some((d) => d.id === saved?.activeId) ? saved!.activeId : valid[0].id
@@ -167,35 +225,65 @@ function loadSaved(): Saved {
   return { activeId: starter.id, dashboards: [starter] }
 }
 
-export function useDashboards() {
-  const [saved, setSaved] = useState<Saved>(loadSaved)
-  useEffect(() => write(DASHBOARDS_KEY, saved), [saved])
+/** Dashboards for an owner: a signed-in user's UID, or null for the guest. */
+export function useDashboards(owner: string | null = null) {
+  const [state, setState] = useState(() => ({ owner, saved: loadSaved(owner) }))
+  // Switching owner (sign-in, sign-out) loads that owner's copy.
+  let current = state
+  if (state.owner !== owner) {
+    current = { owner, saved: loadSaved(owner) }
+    setState(current)
+  }
+  const saved = current.saved
+  useEffect(() => write(keyFor(DASHBOARDS_KEY, state.owner), state.saved), [state])
+  const setSaved = useCallback((change: (s: Saved) => Saved) => setState((s) => ({ ...s, saved: change(s.saved) })), [])
 
   const active = saved.dashboards.find((d) => d.id === saved.activeId) ?? saved.dashboards[0]
 
   const update = useCallback((next: Dashboard) => {
     setSaved((s) => ({ ...s, dashboards: s.dashboards.map((d) => (d.id === next.id ? next : d)) }))
-  }, [])
+  }, [setSaved])
   const add = useCallback((d: Dashboard) => {
     setSaved((s) => ({ activeId: d.id, dashboards: [...s.dashboards, d] }))
-  }, [])
+  }, [setSaved])
   const remove = useCallback((id: string) => {
     setSaved((s) => {
       const rest = s.dashboards.filter((d) => d.id !== id)
       const dashboards = rest.length ? rest : [starterDashboard()]
       return { activeId: dashboards[0].id, dashboards }
     })
-  }, [])
-  const select = useCallback((id: string) => setSaved((s) => ({ ...s, activeId: id })), [])
+  }, [setSaved])
+  const select = useCallback((id: string) => setSaved((s) => ({ ...s, activeId: id })), [setSaved])
+  /** Replace everything, e.g. with the copy synced from the account. */
+  const replace = useCallback((next: Saved) => setSaved(() => next), [setSaved])
 
-  return { dashboards: saved.dashboards, active, update, add, remove, select }
+  return { dashboards: saved.dashboards, active, saved, update, add, remove, select, replace }
 }
 
-export function useSettings() {
-  const [settings, setSettings] = useState<Settings>(() => ({
-    ...DEFAULT_SETTINGS,
-    ...(read<Partial<Settings>>(SETTINGS_KEY) ?? {}),
-  }))
-  useEffect(() => write(SETTINGS_KEY, settings), [settings])
-  return [settings, setSettings] as const
+function loadSettings(owner: string | null): Settings {
+  const stored = read<Partial<Settings>>(keyFor(SETTINGS_KEY, owner)) ?? (owner ? read<Partial<Settings>>(SETTINGS_KEY) : null)
+  return settingsFrom({ ...DEFAULT_SETTINGS, ...(stored ?? {}) })
+}
+
+/** Settings for an owner: a signed-in user's UID, or null for the guest. */
+export function useSettings(owner: string | null = null) {
+  const [state, setState] = useState(() => ({ owner, settings: loadSettings(owner) }))
+  let current = state
+  if (state.owner !== owner) {
+    current = { owner, settings: loadSettings(owner) }
+    setState(current)
+  }
+  useEffect(() => write(keyFor(SETTINGS_KEY, state.owner), state.settings), [state])
+  const setSettings = useCallback((settings: Settings) => setState((s) => ({ ...s, settings })), [])
+  return [current.settings, setSettings] as const
+}
+
+/** Forget an account's cached dashboards and settings in this browser (after deleting it). */
+export function forgetOwner(owner: string): void {
+  try {
+    localStorage.removeItem(keyFor(DASHBOARDS_KEY, owner))
+    localStorage.removeItem(keyFor(SETTINGS_KEY, owner))
+  } catch {
+    // Nothing stored.
+  }
 }

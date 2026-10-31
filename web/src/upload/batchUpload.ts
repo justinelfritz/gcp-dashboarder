@@ -38,11 +38,11 @@ export function makeBatches(files: File[], limits: BatchLimits = DEFAULT_LIMITS)
   return batches
 }
 
-type Uploader = (sessionId: string, files: File[], options: UploadOptions) => Promise<UploadResponse>
+type Uploader = (scope: string, files: File[], options: UploadOptions) => Promise<UploadResponse>
 
 /** Upload batches one at a time. A failed batch is reported and the rest still upload. */
 export async function uploadInBatches(
-  sessionId: string,
+  scope: string,
   files: File[],
   options: UploadOptions,
   onProgress: (p: BatchProgress) => void = () => {},
@@ -54,7 +54,7 @@ export async function uploadInBatches(
   onProgress({ uploadedFiles: 0, totalFiles: files.length })
   for (const batch of makeBatches(files, limits)) {
     try {
-      const resp = await upload(sessionId, batch, options)
+      const resp = await upload(scope, batch, options)
       result.reports.push(...resp.files)
       result.totalActivities = resp.total_activities
     } catch (err) {

@@ -21,6 +21,9 @@ ACTIVITY_COLUMNS: dict[str, str] = {
     "activity_id": "string",
     "source_file": "string",
     "source_format": "string",  # fit | garmin_csv | strava_csv
+    # SHA-256 of the uploaded file this row came from, so deleting the activity can remove the
+    # original too. Empty for rows stored before it was recorded.
+    "source_sha256": "string",
     "name": "string",
     "start_time": "datetime64[us, UTC]",
     "tz_offset_min": "Int32",  # local time = start_time + offset, when known

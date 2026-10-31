@@ -2,6 +2,20 @@ import { api } from './client'
 
 const STORAGE_KEY = 'dashboarder.session_id'
 
+/** The guest session ID saved in this browser, if any. */
+export function storedSessionId(): string | null {
+  return readStored()
+}
+
+/** Forget this browser's guest session (its data expires on the server after a few days). */
+export function forgetSession(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // Nothing stored.
+  }
+}
+
 function readStored(): string | null {
   try {
     return localStorage.getItem(STORAGE_KEY)

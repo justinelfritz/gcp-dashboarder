@@ -3,11 +3,12 @@ import { Responsive, WidthProvider } from 'react-grid-layout'
 import type { Layout } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
+import { api } from '../api/client'
 import type { ActivityType } from '../api/client'
 import type { FigureContext } from '../charts/buildFigure'
 import { currentTheme } from '../charts/palette'
 import { activityLabel, useActivities, useFieldCatalog, usePanelResults } from '../dashboard/hooks'
-import { blankPanel, isSelected, retitleForTypes, starterDashboard, Y2_SUFFIX } from '../dashboard/model'
+import { blankPanel, dateWindow, isSelected, retitleForTypes, starterDashboard, Y2_SUFFIX } from '../dashboard/model'
 import { DashboardImportError, exportDashboard, parseDashboard } from '../dashboard/store'
 import type { useDashboards } from '../dashboard/store'
 import { newId, SCHEMA_VERSION } from '../dashboard/types'
@@ -33,18 +34,22 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 ]
 
 interface Props {
-  sessionId: string
+  scope: string
   store: ReturnType<typeof useDashboards>
   settings: Settings
   onSettings: (s: Settings) => void
   refreshKey: number
 }
 
-export default function DashboardView({ sessionId, store, settings, onSettings, refreshKey }: Props) {
+export default function DashboardView({ scope, store, settings, onSettings, refreshKey: outerRefresh }: Props) {
   const dashboard = store.active
-  const { results, loading, error } = usePanelResults(sessionId, dashboard, settings, refreshKey)
-  const catalog = useFieldCatalog(sessionId, dashboard.filters.activity_types, refreshKey)
-  const activities = useActivities(sessionId, dashboard.filters, refreshKey)
+  // Deleting an activity here changes stored data too, so refetch as after an upload.
+  const [deletions, setDeletions] = useState(0)
+  // Both only ever increase, so their sum changes whenever either does.
+  const refreshKey = outerRefresh + deletions
+  const { results, loading, error } = usePanelResults(scope, dashboard, settings, refreshKey)
+  const catalog = useFieldCatalog(scope, dashboard.filters.activity_types, refreshKey)
+  const activities = useActivities(scope, dashboard.filters, refreshKey)
   const activityNames = useMemo(
     () => new Map(activities.items.map((a) => [a.activity_id, activityLabel(a)])),
     [activities.items],
@@ -56,9 +61,16 @@ export default function DashboardView({ sessionId, store, settings, onSettings, 
   const [importError, setImportError] = useState<string | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
 
+  const { date_preset: preset, start, end } = dashboard.filters
   const ctx: FigureContext = useMemo(
-    () => ({ settings, activityTypes: dashboard.filters.activity_types, theme: currentTheme(), activityNames }),
-    [settings, dashboard.filters.activity_types, activityNames],
+    () => ({
+      settings,
+      activityTypes: dashboard.filters.activity_types,
+      theme: currentTheme(),
+      activityNames,
+      dateWindow: dateWindow({ activity_types: [], date_preset: preset, start, end }),
+    }),
+    [settings, dashboard.filters.activity_types, activityNames, preset, start, end],
   )
 
   const update = (patch: Partial<Dashboard>) => store.update({ ...dashboard, ...patch })
@@ -239,6 +251,10 @@ export default function DashboardView({ sessionId, store, settings, onSettings, 
             setPicking(false)
           }}
           onCancel={() => setPicking(false)}
+          onDelete={async (activityId) => {
+            await api.deleteActivity(scope, activityId)
+            setDeletions((n) => n + 1)
+          }}
         />
       )}
 

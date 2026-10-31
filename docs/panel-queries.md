@@ -1,6 +1,8 @@
 # Panel queries
 
-`POST /sessions/{id}/query` takes a display's filters and a batch of panel definitions and
+`POST /sessions/{id}/query` (a guest session) or `POST /me/query` (the signed-in user, with a
+Firebase ID token as `Authorization: Bearer …`) takes a display's filters and a batch of panel
+definitions and
 returns plot-ready series for each panel. All values are metric (m, s, m/s, s/km, W); the
 frontend converts units for display.
 
