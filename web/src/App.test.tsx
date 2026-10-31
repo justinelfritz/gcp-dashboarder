@@ -14,7 +14,7 @@ describe('App', () => {
 
   it('shows connected and stores a session when the API is healthy', async () => {
     mockFetch((url) =>
-      url.endsWith('/healthz')
+      url.endsWith('/health')
         ? Response.json({ status: 'ok' })
         : url.includes('/activities')
           ? Response.json({ total: 0, items: [] })

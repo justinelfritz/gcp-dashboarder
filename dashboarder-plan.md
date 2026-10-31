@@ -122,7 +122,7 @@ Keep this schema versioned (`"schema_version": 1`) from the start.
 | POST | `/sessions/{id}/uploads` | Upload CSV/FIT (multipart). Returns parse summary and warnings |
 | GET | `/sessions/{id}/activities` | Paginated activity list with filters |
 | POST | `/sessions/{id}/query` | Body: panel definition(s) plus filters. Returns series/table data |
-| GET | `/healthz` | Health check for Cloud Run |
+| GET | `/health` | Health check (not `/healthz`, which Cloud Run reserves) |
 
 Use one query endpoint that accepts a batch of panel definitions. This lets the frontend fetch a whole dashboard in one request.
 

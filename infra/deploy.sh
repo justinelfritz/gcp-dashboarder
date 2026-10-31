@@ -46,7 +46,7 @@ WEB_ORIGIN="https://storage.googleapis.com"
 
 echo "==> Deploying Cloud Run service ${SERVICE}"
 gcloud run deploy "$SERVICE" --source "$ROOT/api" --region "$REGION" \
-  --allow-unauthenticated --min-instances=0 --max-instances=5 --memory=1Gi \
+  --allow-unauthenticated --min-instances=0 --max-instances=5 --memory=1Gi --concurrency=4 \
   --set-env-vars="^@^DASHBOARDER_SESSION_BUCKET=${SESSION_BUCKET}@DASHBOARDER_CORS_ORIGINS=${WEB_ORIGIN}"
 
 # Let the service's runtime identity read/write session data.
@@ -68,5 +68,5 @@ gcloud storage rsync "$ROOT/web/dist" "gs://${WEB_BUCKET}" --recursive --delete-
 
 echo
 echo "Done."
-echo "  API:      ${API_URL}/healthz"
+echo "  API:      ${API_URL}/health"
 echo "  Frontend: ${WEB_ORIGIN}/${WEB_BUCKET}/index.html"

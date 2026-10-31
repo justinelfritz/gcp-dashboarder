@@ -201,7 +201,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<HealthResponse>('/healthz'),
+  health: () => request<HealthResponse>('/health'),
   createSession: () => request<SessionResponse>('/sessions', { method: 'POST' }),
   upload: (sessionId: string, files: File[], options: UploadOptions = {}) => {
     const form = new FormData()

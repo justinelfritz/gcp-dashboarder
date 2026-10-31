@@ -169,3 +169,12 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
   monthly points, per x unit otherwise), so the trend can be read without hovering.
 - The fit uses only the plotted points: weeks or months with no activities are left out rather
   than counted as zero. A series needs two distinct x values to get a trend.
+
+## 2026-10-31: Cloud Run readiness
+
+- **Health check is `/health`, not `/healthz`.** Cloud Run reserves paths ending in `/healthz`
+  and answers them itself, so the frontend's startup check (which gates session creation) would
+  never reach the app.
+- **Concurrency 4 per instance** (Cloud Run's default is 80). Queries are CPU- and memory-heavy
+  pandas work in 1 vCPU / 1 GiB; a few large ones at once could exhaust memory, so Cloud Run
+  starts another instance instead (up to the max of 5). Revisit after measuring real queries.

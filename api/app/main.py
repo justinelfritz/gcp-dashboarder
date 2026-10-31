@@ -54,8 +54,8 @@ def get_storage() -> Storage:
     return LocalStorage(settings.local_storage_dir)
 
 
-@app.get("/healthz", response_model=HealthResponse)
-def healthz() -> HealthResponse:
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
