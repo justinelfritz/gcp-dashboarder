@@ -3,8 +3,8 @@ import { Responsive, WidthProvider } from 'react-grid-layout'
 import type { Layout } from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
-import { api } from '../api/client'
-import type { ActivityType } from '../api/client'
+import { api, STANDARD_SUBTYPE_HINT, subtypeLabel } from '../api/client'
+import type { ActivitySubtype, ActivityType } from '../api/client'
 import type { FigureContext } from '../charts/buildFigure'
 import { currentTheme } from '../charts/palette'
 import { activityLabel, useActivities, useFieldCatalog, usePanelResults } from '../dashboard/hooks'
@@ -171,6 +171,36 @@ export default function DashboardView({ scope, store, settings, onSettings, refr
             {t.label}
           </label>
         ))}
+        {TYPES.filter((t) => dashboard.filters.activity_types.includes(t.value)).map((t) => {
+          // Offered once the data has more than one subtype for the sport (trail and standard runs).
+          const counts = catalog?.subtypes?.[t.value] ?? {}
+          const chosen = dashboard.filters.activity_subtypes?.[t.value]?.[0] ?? ''
+          const options = Object.keys(counts) as ActivitySubtype[]
+          if (options.length < 2 && !chosen) return null
+          return (
+            <select
+              key={t.value}
+              aria-label={`${t.label} subtype`}
+              title={STANDARD_SUBTYPE_HINT}
+              className={chosen ? 'chip-active' : undefined}
+              value={chosen}
+              onChange={(e) => {
+                const rest = { ...dashboard.filters.activity_subtypes }
+                if (e.target.value) rest[t.value] = [e.target.value as ActivitySubtype]
+                else delete rest[t.value]
+                setFilters({ activity_subtypes: Object.keys(rest).length ? rest : undefined })
+              }}
+            >
+              <option value="">All {t.label.toLowerCase()}</option>
+              {chosen && !options.includes(chosen as ActivitySubtype) && (
+                <option value={chosen}>{subtypeLabel(chosen)} {t.label.toLowerCase()} (0)</option>
+              )}
+              {options.map((s) => (
+                <option key={s} value={s}>{subtypeLabel(s)} {t.label.toLowerCase()} ({counts[s]})</option>
+              ))}
+            </select>
+          )
+        })}
         <button
           type="button"
           className={selectedCount < activities.items.length || selection?.mode === 'only' ? 'secondary chip-active' : 'secondary'}

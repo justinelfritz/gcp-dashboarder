@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AxisSpec, FieldCatalog, FieldInfo, Level } from '../api/client'
+import { STANDARD_SUBTYPE_HINT, subtypeLabel } from '../api/client'
+import type { ActivitySubtype, AxisSpec, FieldCatalog, FieldInfo, Level } from '../api/client'
 import { currentTheme, SCATTER_SERIES_LIMIT } from '../charts/palette'
-import { usesLaps, y2Slots, yAggregates } from '../dashboard/model'
+import { splitBySubtype, subtypeCounts, usesLaps, y2Slots, yAggregates } from '../dashboard/model'
 import { AGGREGATIONS, DISTANCE_PRESETS, LINE_STYLES, PALETTE_SIZE } from '../dashboard/types'
 import type { LineStyle, PanelConfig, SeriesConfig, Settings } from '../dashboard/types'
 
@@ -84,6 +85,9 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
 
   const setSeries = (i: number, patch: Partial<SeriesConfig>) =>
     set({ series: p.series.map((s, j) => (j === i ? { ...s, ...patch } : s)) })
+  // Subtypes in the dashboard's activities, for all sports or the series' own.
+  const subtypesFor = (sport: SeriesConfig['activity_type']) => Object.keys(subtypeCounts(catalog, sport)) as ActivitySubtype[]
+  const split = splitBySubtype(p.series, subtypeCounts(catalog, p.series[0]?.activity_type))
   const addSeries = () => {
     const used = new Set(p.series.map((s) => s.color_slot))
     const slot = [...Array(PALETTE_SIZE).keys()].find((k) => !used.has(k)) ?? 0
@@ -207,6 +211,20 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
                   <option value="ride">Rides</option>
                   <option value="hike">Hikes</option>
                 </select>
+                {(subtypesFor(s.activity_type).length > 1 || s.activity_subtype) && (
+                  <select
+                    aria-label={`Series ${i + 1} subtype`}
+                    title={STANDARD_SUBTYPE_HINT}
+                    value={s.activity_subtype ?? ''}
+                    onChange={(e) => setSeries(i, { activity_subtype: (e.target.value || null) as SeriesConfig['activity_subtype'] })}
+                  >
+                    <option value="">Any subtype</option>
+                    {s.activity_subtype && !subtypesFor(s.activity_type).includes(s.activity_subtype) && (
+                      <option value={s.activity_subtype}>{subtypeLabel(s.activity_subtype)}</option>
+                    )}
+                    {subtypesFor(s.activity_type).map((t) => <option key={t} value={t}>{subtypeLabel(t)}</option>)}
+                  </select>
+                )}
                 <DistancePicker
                   value={s.distance_m ?? null}
                   units={settings.units}
@@ -222,6 +240,12 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
             ))}
             {p.series.length < PALETTE_SIZE && (
               <button type="button" className="secondary" onClick={addSeries}>Add series</button>
+            )}
+            {split && (
+              <button type="button" className="secondary" onClick={() => set({ series: split })}
+                title="Replace the series with one per subtype, e.g. trail runs and standard runs as separate lines">
+                Split by subtype
+              </button>
             )}
             {p.chart === 'scatter' && p.series.length > SCATTER_SERIES_LIMIT && (
               <p className="hint">

@@ -73,7 +73,7 @@ MESSAGES = {
 }
 
 SPORTS = {"generic": 0, "running": 1, "cycling": 2, "swimming": 5, "training": 10}
-SUB_SPORTS = {"generic": 0, "treadmill": 1, "trail": 3, "indoor_cycling": 6,
+SUB_SPORTS = {"generic": 0, "treadmill": 1, "trail": 3, "indoor_cycling": 6, "gravel_cycling": 46,
               "strength_training": 20}
 LAP_TRIGGERS = {"manual": 0, "distance": 2, "session_end": 7}
 

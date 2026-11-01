@@ -1,6 +1,6 @@
 // Dashboard definitions, stored in localStorage and exported/imported as JSON.
 // Bump SCHEMA_VERSION (and migrate in store.ts) whenever this shape changes.
-import type { ActivityType, Aggregation, AxisSpec, PanelQuery } from '../api/client'
+import type { ActivitySubtype, ActivityType, Aggregation, AxisSpec, PanelQuery } from '../api/client'
 
 export const SCHEMA_VERSION = 1
 
@@ -9,6 +9,8 @@ export type DatePreset = 'last_30' | 'last_60' | 'last_90' | 'last_180' | 'last_
 
 export interface DashboardFilters {
   activity_types: ActivityType[]
+  /** Narrow a sport to some subtypes (trail runs only, say); a sport not listed keeps them all. */
+  activity_subtypes?: Partial<Record<ActivityType, ActivitySubtype[]>>
   date_preset: DatePreset
   /** Local dates (YYYY-MM-DD), used when date_preset is "custom". */
   start?: string
@@ -34,6 +36,8 @@ export interface SeriesConfig {
   distance_m?: number | null
   /** Limit this series to one sport, e.g. runs vs rides on one panel. */
   activity_type?: ActivityType | null
+  /** Limit this series to one subtype, e.g. trail vs standard runs on one panel. */
+  activity_subtype?: ActivitySubtype | null
   /** Palette slot for this series' right-axis line; absent picks a slot the left series don't use. */
   y2_color_slot?: number | null
 }

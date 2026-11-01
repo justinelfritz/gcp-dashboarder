@@ -67,11 +67,32 @@ export interface UploadOptions {
 export type ActivityType = 'run' | 'ride' | 'hike'
 export type Level = 'activity' | 'lap' | 'record'
 
+/** Finer kinds within a sport, from the source's own type. Mirrors ACTIVITY_SUBTYPES in api/app/parsing/schema.py. */
+export const ACTIVITY_SUBTYPES = ['standard', 'trail', 'track', 'road', 'gravel', 'mountain', 'cyclocross', 'e_bike'] as const
+export type ActivitySubtype = (typeof ACTIVITY_SUBTYPES)[number]
+const SUBTYPE_LABELS: Record<ActivitySubtype, string> = {
+  standard: 'Standard',
+  trail: 'Trail',
+  track: 'Track',
+  road: 'Road',
+  gravel: 'Gravel',
+  mountain: 'Mountain',
+  cyclocross: 'Cyclocross',
+  e_bike: 'E-bike',
+}
+export function subtypeLabel(s: string): string {
+  return SUBTYPE_LABELS[s as ActivitySubtype] ?? s
+}
+/** What "Standard" means, for tooltips. */
+export const STANDARD_SUBTYPE_HINT = 'Standard: the file names no subtype (Garmin’s plain Running, Cycling, or Hiking).'
+
 export interface ActivitySummary {
   activity_id: string
   name: string | null
   activity_type: ActivityType
   raw_activity_type: string | null
+  /** "standard" when the source names none. */
+  activity_subtype: ActivitySubtype
   source_format: SourceFormat
   start_time: string
   tz_offset_min: number | null
@@ -114,6 +135,8 @@ export interface FieldInfo {
 export interface FieldCatalog {
   total_activities: number
   levels: Record<Level, FieldInfo[]>
+  /** Sport -> subtype -> number of the selected activities, e.g. { run: { trail: 5 } }. */
+  subtypes?: Partial<Record<ActivityType, Partial<Record<ActivitySubtype, number>>>>
 }
 
 // ---- Panel queries ----
@@ -136,6 +159,8 @@ export interface DateRange {
 
 export interface DisplayFilters {
   activity_types?: ActivityType[]
+  /** Narrow a sport to some subtypes, e.g. { run: ['trail'] }; sports not listed keep them all. */
+  activity_subtypes?: Partial<Record<ActivityType, ActivitySubtype[]>>
   date_range?: DateRange
   filters?: FieldFilter[]
   /** Analyze only these activities. */

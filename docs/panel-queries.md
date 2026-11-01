@@ -12,6 +12,7 @@ frontend converts units for display.
 {
   "filters": {
     "activity_types": ["run"],
+    "activity_subtypes": { "run": ["trail"] },
     "date_range": { "last_days": 60 },
     "filters": []
   },
@@ -19,6 +20,12 @@ frontend converts units for display.
   "panels": [ ... ]
 }
 ```
+
+`activity_subtypes` narrows a sport to some subtypes; sports not listed keep all of theirs (here:
+trail runs only). Subtypes: `standard` (the file names none, e.g. Garmin's plain "Running"),
+`trail`, `track`, `road`, `gravel`, `mountain`, `cyclocross`, `e_bike`. They're derived from the
+source's own type (FIT `running/trail`, Garmin CSV "Trail Running", Strava "Trail Run"), and
+`activity_subtype` is also an activity field that panel and series filters can use.
 
 `date_range` takes `last_days`, or `start`/`end` as local dates (inclusive).
 `activity_ids` limits the display to those activities; `exclude_activity_ids` leaves those out.
@@ -45,7 +52,8 @@ Filters: `{ "field", "op", "value", "tolerance"? }` with `op` one of `eq`, `neq`
 request's `distance_tolerance`).
 
 `GET /sessions/{id}/fields?activity_type=run` lists every field per level, with units and how
-many of the selected activities have data for it.
+many of the selected activities have data for it, plus `subtypes`: the count of selected
+activities per sport and subtype (`{ "run": { "trail": 5, "standard": 5 } }`).
 
 ## Examples
 
@@ -80,6 +88,19 @@ Runs and rides as separate series:
   "series": [
     { "label": "Runs", "filters": [{ "field": "activity_type", "op": "eq", "value": "run" }] },
     { "label": "Rides", "filters": [{ "field": "activity_type", "op": "eq", "value": "ride" }] }
+  ]
+}
+```
+
+Trail runs and standard runs as separate series (the web app's "Split by subtype"):
+
+```json
+{
+  "id": "pace-by-subtype",
+  "y": { "field": "avg_pace_s_per_km" },
+  "series": [
+    { "label": "Trail", "filters": [{ "field": "activity_subtype", "op": "eq", "value": "trail" }] },
+    { "label": "Standard", "filters": [{ "field": "activity_subtype", "op": "eq", "value": "standard" }] }
   ]
 }
 ```

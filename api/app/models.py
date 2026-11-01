@@ -103,6 +103,7 @@ class ActivitySummary(BaseModel):
     name: str | None
     activity_type: str
     raw_activity_type: str | None
+    activity_subtype: str  # trail, road, gravel, …; "standard" when the source names none
     source_format: str
     start_time: datetime
     tz_offset_min: int | None
@@ -133,6 +134,8 @@ class FieldInfo(BaseModel):
 class FieldCatalog(BaseModel):
     total_activities: int
     levels: dict[str, list[FieldInfo]]
+    # Sport -> subtype -> number of the selected activities, e.g. {"run": {"trail": 5}}.
+    subtypes: dict[str, dict[str, int]] = {}
 
 
 # ---- Panel queries ----
@@ -155,6 +158,8 @@ class DateRange(BaseModel):
 
 class DisplayFilters(BaseModel):
     activity_types: list[Literal["run", "ride", "hike"]] = ["run", "ride", "hike"]
+    # Narrow a sport to some subtypes, e.g. {"run": ["trail"]}; sports not listed keep them all.
+    activity_subtypes: dict[Literal["run", "ride", "hike"], list[str]] = {}
     date_range: DateRange | None = None
     filters: list[FieldFilter] = []
     # Hand-picked selection: analyze only these activities, or everything except these.

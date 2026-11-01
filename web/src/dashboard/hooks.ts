@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { ActivityListParams, ActivitySummary, ActivityType, FieldCatalog, PanelResult, QueryRequest } from '../api/client'
-import { toDateRange, toQueryRequest } from './model'
+import { activeSubtypes, toDateRange, toQueryRequest } from './model'
 import type { Dashboard, DashboardFilters, Settings } from './types'
 
 const QUERY_DEBOUNCE_MS = 300
@@ -65,8 +65,8 @@ export function useFieldCatalog(scope: string, activityTypes: ActivityType[], re
 }
 
 /**
- * Every activity matching the dashboard's sport and date filters (ignoring the hand-picked
- * selection, which is chosen from this list), newest first.
+ * Every activity matching the dashboard's sport, subtype, and date filters (ignoring the
+ * hand-picked selection, which is chosen from this list), newest first.
  */
 export function useActivities(scope: string, filters: DashboardFilters, refreshKey: number) {
   const [items, setItems] = useState<ActivitySummary[]>([])
@@ -92,7 +92,13 @@ export function useActivities(scope: string, filters: DashboardFilters, refreshK
       cancelled = true
     }
   }, [scope, paramsKey, refreshKey])
-  return { items, loaded }
+  // Subtypes narrow the list here rather than in the request, so changing them needs no refetch.
+  const subtypesKey = JSON.stringify(activeSubtypes(filters))
+  const shown = useMemo(() => {
+    const subtypes = JSON.parse(subtypesKey) as ReturnType<typeof activeSubtypes>
+    return items.filter((a) => subtypes[a.activity_type]?.includes(a.activity_subtype) ?? true)
+  }, [items, subtypesKey])
+  return { items: shown, loaded }
 }
 
 export function activityLabel(a: ActivitySummary): string {

@@ -10,7 +10,8 @@ import DashboardView from './DashboardView'
 const query = vi.fn()
 const deleteActivity = vi.fn<(scope: string, id: string) => Promise<void>>(async () => {})
 
-vi.mock('../api/client', () => ({
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
   api: {
     query: (...args: unknown[]) => query(...args),
     deleteActivity: (scope: string, id: string) => deleteActivity(scope, id),
@@ -26,6 +27,7 @@ vi.mock('../api/client', () => ({
         lap: [{ name: 'avg_pace_s_per_km', label: 'Lap pace', unit: 's/km', kind: 'number', coverage: 2 }],
         record: [{ name: 'speed', label: 'Speed', unit: 'm/s', kind: 'number', coverage: 2 }],
       },
+      subtypes: { run: { trail: 2, standard: 1 } },
     }),
     activities: async () => ({
       total: 3,
@@ -33,6 +35,7 @@ vi.mock('../api/client', () => ({
         activity_id: id,
         name: `Run ${3 - i}`,
         activity_type: 'run',
+        activity_subtype: i === 2 ? 'standard' : 'trail',
         start_time: `2026-09-0${7 - i}T12:00:00Z`,
         tz_offset_min: -240,
         distance_m: 5000,
@@ -85,6 +88,18 @@ describe('DashboardView', () => {
     const req = query.mock.calls[0][1] as QueryRequest
     expect(req.panels).toHaveLength(4)
     expect(req.filters?.activity_types).toEqual(['run'])
+  })
+
+  it('narrows runs to one subtype, in the query and the activity count', async () => {
+    render(<Harness />)
+    await screen.findAllByTestId('chart')
+    expect(screen.getByText('All 3 activities')).toBeInTheDocument()
+    const select = await screen.findByLabelText('Runs subtype')
+    expect(within(select).getByText('Trail runs (2)')).toBeInTheDocument()
+    fireEvent.change(select, { target: { value: 'trail' } })
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(2))
+    expect((query.mock.calls[1][1] as QueryRequest).filters?.activity_subtypes).toEqual({ run: ['trail'] })
+    expect(screen.getByText('All 2 activities')).toBeInTheDocument()
   })
 
   it('shows a panel as a table in display units', async () => {

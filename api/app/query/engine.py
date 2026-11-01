@@ -27,7 +27,7 @@ from app.models import (
     QueryResponse,
     SeriesResult,
 )
-from app.parsing.schema import VISIBLE_TYPES
+from app.parsing.schema import VISIBLE_TYPES, normalize_activity_subtype
 from app.parsing.segments import MOVING_SPEED_MPS
 from app.query import catalog
 from app.storage.data_store import DataStore
@@ -79,9 +79,15 @@ def run_query(store: DataStore, req: QueryRequest, now: datetime | None = None) 
 
 
 def visible_activities(df: pd.DataFrame) -> pd.DataFrame:
-    """Activities the app analyzes: runs, rides, and hikes, outdoors."""
+    """Activities the app analyzes (runs, rides, and hikes, outdoors), with their subtype.
+
+    The subtype is derived on read rather than stored, so activities stored before it existed
+    get one too.
+    """
     keep = df["activity_type"].isin(VISIBLE_TYPES) & ~df["is_indoor"].fillna(False).astype(bool)
-    return df[keep].reset_index(drop=True)
+    df = df[keep].reset_index(drop=True)
+    raw = df["raw_activity_type"].astype(object).where(df["raw_activity_type"].notna(), None)
+    return df.assign(activity_subtype=raw.map(normalize_activity_subtype).astype("string"))
 
 
 def local_start(df: pd.DataFrame) -> pd.Series:
@@ -93,6 +99,9 @@ def apply_display_filters(
     df: pd.DataFrame, filters: DisplayFilters, tolerance: float, now: datetime | None = None
 ) -> pd.DataFrame:
     df = df[df["activity_type"].isin(filters.activity_types)]
+    for sport, subtypes in filters.activity_subtypes.items():
+        # Narrows only that sport: trail runs plus every ride, say.
+        df = df[(df["activity_type"] != sport) | df["activity_subtype"].isin(subtypes)]
     if filters.date_range:
         dr = filters.date_range
         if dr.last_days:
@@ -382,4 +391,7 @@ def field_catalog(store: DataStore, activity_types: list[str]) -> FieldCatalog:
             infos.append(FieldInfo(name=f.name, label=f.label, unit=f.unit, kind=f.kind,
                                    coverage=coverage))
         levels[level] = infos
-    return FieldCatalog(total_activities=len(acts), levels=levels)
+    subtypes: dict[str, dict[str, int]] = {}
+    for (sport, subtype), n in acts.groupby(["activity_type", "activity_subtype"]).size().items():
+        subtypes.setdefault(str(sport), {})[str(subtype)] = int(n)
+    return FieldCatalog(total_activities=len(acts), levels=levels, subtypes=subtypes)
