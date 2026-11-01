@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FieldCatalog, QueryRequest, QueryResponse } from '../api/client'
-import { useDashboards } from '../dashboard/store'
+import { useDashboardMode, useDashboards } from '../dashboard/store'
 import { DEFAULT_SETTINGS } from '../dashboard/types'
 import type { Settings } from '../dashboard/types'
 import DashboardView from './DashboardView'
@@ -40,6 +40,9 @@ vi.mock('../api/client', async (importOriginal) => ({
         tz_offset_min: -240,
         distance_m: 5000,
         moving_time_s: 1500,
+        duration_s: 1560,
+        avg_hr: 150 + i,
+        has_records: id !== 'a1',
       })),
     }),
   },
@@ -47,7 +50,12 @@ vi.mock('../api/client', async (importOriginal) => ({
 
 // Plotly can't render in jsdom; the figure building it consumes is tested separately.
 vi.mock('../charts/PlotlyChart', () => ({
-  default: ({ label }: { label: string }) => <div data-testid="chart">{label}</div>,
+  default: ({ label, onOpenActivity }: { label: string; onOpenActivity?: (id: string) => void }) => (
+    <div data-testid="chart">
+      {label}
+      {onOpenActivity && <button type="button" onClick={() => onOpenActivity('a2')}>Open a2 from {label}</button>}
+    </div>
+  ),
 }))
 
 function respond(req: QueryRequest): QueryResponse {
@@ -71,8 +79,15 @@ function respond(req: QueryRequest): QueryResponse {
 function Harness({ initial = DEFAULT_SETTINGS }: { initial?: Settings }) {
   const store = useDashboards()
   const [settings, setSettings] = useState(initial)
-  return <DashboardView scope="/sessions/s" store={store} settings={settings} onSettings={setSettings} refreshKey={0} />
+  const [mode, setMode] = useDashboardMode()
+  const [activityId, setActivityId] = useState<string | null>(null)
+  return (
+    <DashboardView scope="/sessions/s" store={store} settings={settings} onSettings={setSettings} refreshKey={0}
+      mode={mode} onMode={setMode} activityId={activityId} onActivity={setActivityId} />
+  )
 }
+
+const lastRequest = () => query.mock.lastCall![1] as QueryRequest
 
 describe('DashboardView', () => {
   beforeEach(() => {
@@ -211,5 +226,70 @@ describe('DashboardView', () => {
     await waitFor(() => expect(deleteActivity).toHaveBeenCalledWith('/sessions/s', 'a2'))
     await waitFor(() => expect(query.mock.calls.length).toBeGreaterThan(queriesBefore))
     confirm.mockRestore()
+  })
+
+  describe('individual activity mode', () => {
+    const openMode = async () => {
+      render(<Harness />)
+      await screen.findAllByTestId('chart')
+      fireEvent.click(screen.getByRole('button', { name: 'Individual activity' }))
+      await screen.findByRole('heading', { name: 'Run 3' })
+    }
+
+    it('opens the newest activity and queries only it', async () => {
+      await openMode()
+      expect(screen.getByRole('button', { name: 'Individual activity' })).toHaveAttribute('aria-pressed', 'true')
+      await waitFor(() => expect(lastRequest().filters?.activity_ids).toEqual(['a3']))
+      expect(lastRequest().panels.every((p) => p.group_by === 'point')).toBe(true)
+      expect(screen.getByRole('toolbar', { name: 'Activity layout' })).toBeInTheDocument()
+      expect(within(screen.getByLabelText('Activity summary')).getByText('Average heart rate')).toBeInTheDocument()
+      expect(await screen.findAllByTestId('chart')).toHaveLength(3)
+    })
+
+    it('steps to older and newer activities', async () => {
+      await openMode()
+      expect(screen.getByRole('button', { name: 'Newer →' })).toBeDisabled()
+      fireEvent.click(screen.getByRole('button', { name: '← Older' }))
+      await screen.findByRole('heading', { name: 'Run 2' })
+      await waitFor(() => expect(lastRequest().filters?.activity_ids).toEqual(['a2']))
+      fireEvent.click(screen.getByRole('button', { name: '← Older' }))
+      // The oldest has summary data only (a CSV row), so there's nothing to chart.
+      await screen.findByText(/summary data only/)
+      expect(screen.getByRole('button', { name: '← Older' })).toBeDisabled()
+    })
+
+    it('opens an activity picked in the chooser', async () => {
+      await openMode()
+      fireEvent.click(screen.getByRole('button', { name: 'Choose activity' }))
+      const dialog = screen.getByRole('dialog', { name: 'Open an activity' })
+      fireEvent.change(within(dialog).getByLabelText('Search names or dates'), { target: { value: 'run 2' } })
+      expect(within(dialog).queryByRole('button', { name: 'Run 3' })).not.toBeInTheDocument()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Run 2' }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      await screen.findByRole('heading', { name: 'Run 2' })
+    })
+
+    it('opens a point clicked in an aggregate chart', async () => {
+      render(<Harness />)
+      fireEvent.click((await screen.findAllByRole('button', { name: /^Open a2 from/ }))[0])
+      await screen.findByRole('heading', { name: 'Run 2' })
+      await waitFor(() => expect(lastRequest().filters?.activity_ids).toEqual(['a2']))
+    })
+
+    it('edits panels without grouping or series, and lists only activity layouts', async () => {
+      await openMode()
+      const layouts = screen.getByLabelText('Activity layout', { selector: 'select' })
+      expect(within(layouts).getAllByRole('option').map((o) => o.textContent)).toEqual(['Activity overview'])
+      fireEvent.click(screen.getByRole('button', { name: 'Add panel' }))
+      const dialog = screen.getByRole('dialog')
+      expect(within(dialog).queryByText('Each point is')).not.toBeInTheDocument()
+      expect(within(dialog).queryByText('Series')).not.toBeInTheDocument()
+      expect(within(within(dialog).getByLabelText('Y axis data')).queryByText('Activity summary')).not.toBeInTheDocument()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+      expect(await screen.findAllByTestId('chart')).toHaveLength(4)
+      fireEvent.click(screen.getByRole('button', { name: 'Aggregate activities' }))
+      const dashboards = await screen.findByLabelText('Dashboard', { selector: 'select' })
+      expect(within(dashboards).getAllByRole('option').map((o) => o.textContent)).toEqual(['Running'])
+    })
   })
 })

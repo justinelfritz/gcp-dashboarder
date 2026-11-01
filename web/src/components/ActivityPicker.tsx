@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { subtypeLabel } from '../api/client'
 import type { ActivitySummary } from '../api/client'
 import { displayUnit, formatClock } from '../charts/units'
 import { activityLabel } from '../dashboard/hooks'
 import { ALL_ACTIVITIES, isSelected, setSelected } from '../dashboard/model'
 import type { ActivitySelection, Settings } from '../dashboard/types'
-
-const SPORTS: Record<string, string> = { run: 'Run', ride: 'Ride', hike: 'Hike' }
+import { dayLabel, localDay, sportLabel } from './activityFormat'
 
 interface Props {
   /** Activities matching the dashboard's sport, subtype, and date filters, newest first. */
@@ -17,12 +15,6 @@ interface Props {
   onCancel: () => void
   /** Permanently delete a stored activity (not just leave it out of this dashboard). */
   onDelete?: (activityId: string) => Promise<void>
-}
-
-/** The activity's local calendar date, YYYY-MM-DD. */
-function localDay(a: ActivitySummary): string {
-  const ms = Date.parse(a.start_time) + (a.tz_offset_min ?? 0) * 60_000
-  return new Date(ms).toISOString().slice(0, 10)
 }
 
 export default function ActivityPicker({ activities, selection, settings, onApply, onCancel, onDelete }: Props) {
@@ -178,14 +170,9 @@ export default function ActivityPicker({ activities, selection, settings, onAppl
                           onChange={() => {}}
                         />
                       </td>
-                      <td>{new Date(`${localDay(a)}T00:00:00Z`).toLocaleDateString(undefined, {
-                        timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric', weekday: 'short',
-                      })}</td>
+                      <td>{dayLabel(a)}</td>
                       <td className="picker-name">{activityLabel(a)}</td>
-                      <td>
-                        {SPORTS[a.activity_type] ?? a.activity_type}
-                        {a.activity_subtype && a.activity_subtype !== 'standard' && ` · ${subtypeLabel(a.activity_subtype)}`}
-                      </td>
+                      <td>{sportLabel(a)}</td>
                       <td className="num">{a.distance_m == null ? '–' : (a.distance_m * distUnit.factor).toFixed(2)}</td>
                       <td className="num">{time == null ? '–' : formatClock(time)}</td>
                       {onDelete && (

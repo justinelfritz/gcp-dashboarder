@@ -78,9 +78,17 @@ export interface PanelConfig {
   layout: PanelLayout
 }
 
+/**
+ * "aggregate": compares many activities (filters pick them). "activity": a fixed layout of record
+ * and lap panels that redraws for whichever single activity is open.
+ */
+export type DashboardKind = 'aggregate' | 'activity'
+
 export interface Dashboard {
   schema_version: typeof SCHEMA_VERSION
   id: string
+  /** Absent means "aggregate". */
+  kind?: DashboardKind
   name: string
   filters: DashboardFilters
   panels: PanelConfig[]

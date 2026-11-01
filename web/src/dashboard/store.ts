@@ -2,15 +2,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ACTIVITY_SUBTYPES } from '../api/client'
 import type { ActivitySubtype } from '../api/client'
-import { starterDashboard, upgradeStarterColors } from './model'
+import { activitySeries, kindOf, starterActivityLayout, starterDashboard, upgradeStarterColors } from './model'
 import { DEFAULT_SETTINGS, newId, PALETTE_SIZE, SCHEMA_VERSION } from './types'
-import type { ActivitySelection, Dashboard, PanelConfig, SeriesConfig, Settings } from './types'
+import type { ActivitySelection, Dashboard, DashboardKind, PanelConfig, SeriesConfig, Settings } from './types'
 
 const DASHBOARDS_KEY = 'dashboarder.dashboards'
 const SETTINGS_KEY = 'dashboarder.settings'
+const MODE_KEY = 'dashboarder.mode'
 
 export interface Saved {
+  /** The open aggregate dashboard. */
   activeId: string
+  /** The open activity layout (individual activity mode). */
+  activeLayoutId?: string
   dashboards: Dashboard[]
 }
 
@@ -41,6 +45,7 @@ const ERRORS = ['none', 'std', 'sem']
 const LINES = ['dash', 'dot', 'solid']
 const AGGS = ['mean', 'median', 'min', 'max', 'sum', 'count', 'std']
 const TYPES = ['run', 'ride', 'hike']
+const KINDS = ['aggregate', 'activity']
 const DATE_PRESETS = ['last_30', 'last_60', 'last_90', 'last_180', 'last_365', 'all', 'custom']
 
 function oneOf<T extends string>(value: unknown, allowed: string[], fallback: T, what: string): T {
@@ -168,9 +173,12 @@ function dashboardFrom(value: unknown, keepIds: boolean): Dashboard {
     ? filters.activity_types.filter((t): t is 'run' | 'ride' | 'hike' => TYPES.includes(t as string))
     : ['run' as const]
   if (!Array.isArray(data.panels)) throw new DashboardImportError('missing panels')
+  const kind = oneOf<DashboardKind>(data.kind, KINDS, 'aggregate', 'dashboard kind')
+  const panels = data.panels.slice(0, 24).map((p, i) => panel(p, i, keepIds))
   return {
     schema_version: SCHEMA_VERSION,
     id: idFor(data.id, 'dash', keepIds),
+    ...(kind === 'activity' ? { kind } : {}),
     name: str(data.name, 'Imported dashboard', 80),
     filters: {
       activity_types: types.length ? types : ['run'],
@@ -180,20 +188,48 @@ function dashboardFrom(value: unknown, keepIds: boolean): Dashboard {
       ...(filters.selection !== undefined ? { selection: selection(filters.selection) } : {}),
       ...(subtypeFilters(filters.activity_subtypes) ? { activity_subtypes: subtypeFilters(filters.activity_subtypes) } : {}),
     },
-    panels: data.panels.slice(0, 24).map((p, i) => panel(p, i, keepIds)),
+    panels: kind === 'activity' ? panels.map(forOneActivity) : panels,
   }
+}
+
+/** An activity layout's panel plots the open activity's rows: point mode, one unfiltered series. */
+function forOneActivity(p: PanelConfig): PanelConfig {
+  return { ...p, group_by: 'point', error: 'none', series: activitySeries(p.series[0]?.color_slot ?? 0) }
+}
+
+/** Everyone gets an activity layout, including dashboards saved before the mode existed. */
+function withActivityLayout(saved: Saved): Saved {
+  const layouts = saved.dashboards.filter((d) => kindOf(d) === 'activity')
+  if (layouts.length) {
+    const activeLayoutId = layouts.some((d) => d.id === saved.activeLayoutId) ? saved.activeLayoutId : layouts[0].id
+    return activeLayoutId === saved.activeLayoutId ? saved : { ...saved, activeLayoutId }
+  }
+  const starter = starterActivityLayout()
+  return { ...saved, activeLayoutId: starter.id, dashboards: [...saved.dashboards, starter] }
+}
+
+/** The saved dashboards (or layouts) of one kind. */
+function ofKind(dashboards: Dashboard[], kind: DashboardKind): Dashboard[] {
+  return dashboards.filter((d) => kindOf(d) === kind)
 }
 
 /** Dashboards and settings as stored in a signed-in user's account (`/me/dashboards`). */
 export interface AccountDocument {
   schema_version: typeof SCHEMA_VERSION
   activeId: string
+  activeLayoutId?: string
   dashboards: Dashboard[]
   settings: Settings
 }
 
 export function toAccountDocument(saved: Saved, settings: Settings): AccountDocument {
-  return { schema_version: SCHEMA_VERSION, activeId: saved.activeId, dashboards: saved.dashboards, settings }
+  return {
+    schema_version: SCHEMA_VERSION,
+    activeId: saved.activeId,
+    ...(saved.activeLayoutId ? { activeLayoutId: saved.activeLayoutId } : {}),
+    dashboards: saved.dashboards,
+    settings,
+  }
 }
 
 /**
@@ -212,8 +248,19 @@ export function fromAccountDocument(doc: unknown): { saved: Saved; settings: Set
     }
   })
   if (!dashboards.length) return null
-  const activeId = dashboards.some((x) => x.id === d.activeId) ? (d.activeId as string) : dashboards[0].id
-  return { saved: { activeId, dashboards }, settings: settingsFrom(d.settings) }
+  return {
+    saved: normalizeSaved({ activeId: d.activeId as string, activeLayoutId: d.activeLayoutId as string | undefined, dashboards }),
+    settings: settingsFrom(d.settings),
+  }
+}
+
+/** Both kinds present, and each active id pointing at a dashboard of its kind. */
+function normalizeSaved(saved: Saved): Saved {
+  let { dashboards } = saved
+  if (!ofKind(dashboards, 'aggregate').length) dashboards = [starterDashboard(), ...dashboards]
+  const aggregates = ofKind(dashboards, 'aggregate')
+  const activeId = aggregates.some((x) => x.id === saved.activeId) ? saved.activeId : aggregates[0].id
+  return withActivityLayout({ activeId, activeLayoutId: saved.activeLayoutId, dashboards })
 }
 
 function settingsFrom(value: unknown): Settings {
@@ -237,12 +284,11 @@ const keyFor = (base: string, owner: string | null) => (owner ? `${base}:${owner
 function loadSaved(owner: string | null): Saved {
   const saved = read<Saved>(keyFor(DASHBOARDS_KEY, owner)) ?? (owner ? read<Saved>(DASHBOARDS_KEY) : null)
   const valid = saved?.dashboards?.filter((d) => d?.schema_version === SCHEMA_VERSION) ?? []
-  if (valid.length) {
-    const activeId = valid.some((d) => d.id === saved?.activeId) ? saved!.activeId : valid[0].id
-    return { activeId, dashboards: valid.map(upgradeStarterColors) }
-  }
-  const starter = starterDashboard()
-  return { activeId: starter.id, dashboards: [starter] }
+  return normalizeSaved({
+    activeId: saved?.activeId ?? '',
+    activeLayoutId: saved?.activeLayoutId,
+    dashboards: valid.map((d) => (kindOf(d) === 'aggregate' ? upgradeStarterColors(d) : d)),
+  })
 }
 
 /** Dashboards for an owner: a signed-in user's UID, or null for the guest. */
@@ -258,31 +304,48 @@ export function useDashboards(owner: string | null = null) {
   useEffect(() => write(keyFor(DASHBOARDS_KEY, state.owner), state.saved), [state])
   const setSaved = useCallback((change: (s: Saved) => Saved) => setState((s) => ({ ...s, saved: change(s.saved) })), [])
 
-  const active = saved.dashboards.find((d) => d.id === saved.activeId) ?? saved.dashboards[0]
+  const active = saved.dashboards.find((d) => d.id === saved.activeId) ?? ofKind(saved.dashboards, 'aggregate')[0]
+  const activeLayout = saved.dashboards.find((d) => d.id === saved.activeLayoutId) ?? ofKind(saved.dashboards, 'activity')[0]
 
   const update = useCallback((next: Dashboard) => {
     setSaved((s) => ({ ...s, dashboards: s.dashboards.map((d) => (d.id === next.id ? next : d)) }))
   }, [setSaved])
+  /** Adds a dashboard or layout and opens it (in its own mode). */
   const add = useCallback((d: Dashboard) => {
-    setSaved((s) => ({ activeId: d.id, dashboards: [...s.dashboards, d] }))
+    setSaved((s) => ({ ...s, ...activeFor(d), dashboards: [...s.dashboards, d] }))
   }, [setSaved])
+  /** Deleting the last of a kind brings back that kind's starter. */
   const remove = useCallback((id: string) => {
     setSaved((s) => {
+      const gone = s.dashboards.find((d) => d.id === id)
       const rest = s.dashboards.filter((d) => d.id !== id)
-      const dashboards = rest.length ? rest : [starterDashboard()]
-      return { activeId: dashboards[0].id, dashboards }
+      if (!gone) return s
+      const kind = kindOf(gone)
+      const same = ofKind(rest, kind)
+      const dashboards = same.length ? rest : [...rest, kind === 'activity' ? starterActivityLayout() : starterDashboard()]
+      return { ...s, ...activeFor(ofKind(dashboards, kind)[0]), dashboards }
     })
   }, [setSaved])
-  const select = useCallback((id: string) => setSaved((s) => ({ ...s, activeId: id })), [setSaved])
+  /** Opens a dashboard or layout; each mode remembers its own. */
+  const select = useCallback((id: string) => {
+    setSaved((s) => {
+      const d = s.dashboards.find((x) => x.id === id)
+      return d ? { ...s, ...activeFor(d) } : s
+    })
+  }, [setSaved])
   /** Replace everything, e.g. with the copy synced from the account. */
   const replace = useCallback((next: Saved) => setSaved(() => next), [setSaved])
 
-  return { dashboards: saved.dashboards, active, saved, update, add, remove, select, replace }
+  return { dashboards: saved.dashboards, active, activeLayout, saved, update, add, remove, select, replace }
 }
 
 function loadSettings(owner: string | null): Settings {
   const stored = read<Partial<Settings>>(keyFor(SETTINGS_KEY, owner)) ?? (owner ? read<Partial<Settings>>(SETTINGS_KEY) : null)
   return settingsFrom({ ...DEFAULT_SETTINGS, ...(stored ?? {}) })
+}
+
+function activeFor(d: Dashboard): Partial<Saved> {
+  return kindOf(d) === 'activity' ? { activeLayoutId: d.id } : { activeId: d.id }
 }
 
 /** Settings for an owner: a signed-in user's UID, or null for the guest. */
@@ -296,6 +359,13 @@ export function useSettings(owner: string | null = null) {
   useEffect(() => write(keyFor(SETTINGS_KEY, state.owner), state.settings), [state])
   const setSettings = useCallback((settings: Settings) => setState((s) => ({ ...s, settings })), [])
   return [current.settings, setSettings] as const
+}
+
+/** Aggregate or individual activity mode; remembered in this browser only, not synced. */
+export function useDashboardMode() {
+  const [mode, setMode] = useState<DashboardKind>(() => (read<string>(MODE_KEY) === 'activity' ? 'activity' : 'aggregate'))
+  useEffect(() => write(MODE_KEY, mode), [mode])
+  return [mode, setMode] as const
 }
 
 /** Forget an account's cached dashboards and settings in this browser (after deleting it). */

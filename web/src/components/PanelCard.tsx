@@ -14,11 +14,17 @@ interface Props {
   result2?: PanelResult
   loading: boolean
   ctx: FigureContext
+  /** Shown when nothing matched; the default suits a dashboard of many activities. */
+  emptyMessage?: string
+  /** Clicking a point opens its activity. */
+  onOpenActivity?: (activityId: string) => void
   onEdit: () => void
   onRemove: () => void
 }
 
-export default function PanelCard({ panel, result, result2, loading, ctx, onEdit, onRemove }: Props) {
+const NO_MATCHES = 'No matching activities. Try a longer date range, another distance, or include more activities.'
+
+export default function PanelCard({ panel, result, result2, loading, ctx, emptyMessage = NO_MATCHES, onOpenActivity, onEdit, onRemove }: Props) {
   const [view, setView] = useState<'chart' | 'table'>('chart')
   const ready = result && !result.error && result.x && result.y
   const figure = useMemo(() => (ready ? buildFigure(panel, result, ctx, result2) : null), [ready, panel, result, result2, ctx])
@@ -55,7 +61,7 @@ export default function PanelCard({ panel, result, result2, loading, ctx, onEdit
         ) : result.error ? (
           <p className="empty status-error">This panel can't be drawn: {result.error}</p>
         ) : !hasData(result) && !(panel.y2 && result2 && hasData(result2)) ? (
-          <p className="empty">No matching activities. Try a longer date range, another distance, or include more activities.</p>
+          <p className="empty">{emptyMessage}</p>
         ) : view === 'table' && table ? (
           <div className="table-wrap">
             <table>
@@ -67,7 +73,7 @@ export default function PanelCard({ panel, result, result2, loading, ctx, onEdit
           </div>
         ) : figure ? (
           <Suspense fallback={<p className="empty">Loading chart…</p>}>
-            <PlotlyChart figure={figure} label={panel.title} />
+            <PlotlyChart figure={figure} label={panel.title} onOpenActivity={onOpenActivity} />
           </Suspense>
         ) : null}
       </div>

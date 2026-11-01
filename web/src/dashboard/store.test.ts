@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { starterDashboard, toQueryRequest } from './model'
+import { kindOf, starterActivityLayout, starterDashboard, toQueryRequest } from './model'
 import { DashboardImportError, exportDashboard, forgetOwner, fromAccountDocument, parseDashboard, toAccountDocument, useDashboards } from './store'
 import { DEFAULT_SETTINGS } from './types'
 
@@ -106,11 +106,13 @@ describe('toQueryRequest', () => {
 describe('account documents', () => {
   it('round-trip with IDs kept, dropping only the unreadable dashboard', () => {
     const d = starterDashboard()
-    const doc = toAccountDocument({ activeId: d.id, dashboards: [d] }, { units: 'metric', distance_tolerance: 0.03 })
+    const layout = starterActivityLayout()
+    const doc = toAccountDocument({ activeId: d.id, activeLayoutId: layout.id, dashboards: [d, layout] }, { units: 'metric', distance_tolerance: 0.03 })
     const broken = { ...doc, dashboards: [...doc.dashboards, { schema_version: 1, panels: [{ chart: 'pie' }] }] }
     const back = fromAccountDocument(JSON.parse(JSON.stringify(broken)))!
     expect(back.saved.activeId).toBe(d.id)
-    expect(back.saved.dashboards).toHaveLength(1)
+    expect(back.saved.activeLayoutId).toBe(layout.id)
+    expect(back.saved.dashboards).toHaveLength(2)
     expect(back.saved.dashboards[0].panels.map((p) => p.id)).toEqual(d.panels.map((p) => p.id))
     expect(back.settings).toEqual({ units: 'metric', distance_tolerance: 0.03 })
   })
@@ -140,5 +142,68 @@ describe('per-owner caches', () => {
     expect(result.current.active.name).toBe('Alice board')
     forgetOwner('alice')
     expect(localStorage.getItem('dashboarder.dashboards:alice')).toBeNull()
+  })
+})
+
+describe('activity layouts', () => {
+  afterEach(() => localStorage.clear())
+
+  it('round-trip their kind, and old dashboards load as aggregate', () => {
+    const layout = parseDashboard(exportDashboard(starterActivityLayout()))
+    expect(layout.kind).toBe('activity')
+    expect(layout.panels.map((p) => p.y2?.field ?? null)).toEqual(['hr', null, null])
+    expect(kindOf(parseDashboard(exportDashboard(starterDashboard())))).toBe('aggregate')
+    expect(() => parseDashboard(JSON.stringify({ ...starterActivityLayout(), kind: 'gallery' }))).toThrow(DashboardImportError)
+  })
+
+  it('plot one unfiltered series in point mode, whatever the file says', () => {
+    const layout = starterActivityLayout()
+    layout.panels[0] = {
+      ...layout.panels[0],
+      group_by: 'week',
+      error: 'std',
+      series: [{ label: '5k', color_slot: 3, distance_m: 5000 }, { label: '10k', color_slot: 4 }],
+    }
+    const p = parseDashboard(exportDashboard(layout)).panels[0]
+    expect(p.group_by).toBe('point')
+    expect(p.error).toBe('none')
+    expect(p.series).toEqual([{ label: 'This activity', color_slot: 3 }])
+  })
+
+  it('are added for dashboards saved before the mode existed', () => {
+    const d = starterDashboard()
+    const back = fromAccountDocument({ schema_version: 1, activeId: d.id, dashboards: [d] })!
+    const layouts = back.saved.dashboards.filter((x) => kindOf(x) === 'activity')
+    expect(layouts).toHaveLength(1)
+    expect(back.saved.activeLayoutId).toBe(layouts[0].id)
+    expect(back.saved.activeId).toBe(d.id)
+  })
+
+  it('keep their own selection, and deleting the last one brings back the starter', () => {
+    const { result } = renderHook(() => useDashboards(null))
+    const dashboard = result.current.active
+    const layout = result.current.activeLayout
+    expect(kindOf(dashboard)).toBe('aggregate')
+    expect(kindOf(layout)).toBe('activity')
+    const second = { ...starterActivityLayout(), name: 'Intervals' }
+    act(() => result.current.add(second))
+    expect(result.current.activeLayout.id).toBe(second.id)
+    expect(result.current.active.id).toBe(dashboard.id)
+    act(() => result.current.select(layout.id))
+    expect(result.current.activeLayout.id).toBe(layout.id)
+    act(() => result.current.remove(layout.id))
+    act(() => result.current.remove(second.id))
+    expect(result.current.activeLayout.name).toBe('Activity overview')
+    expect(result.current.activeLayout.id).not.toBe(second.id)
+    expect(result.current.active.id).toBe(dashboard.id)
+  })
+
+  it('query only the open activity, and nothing until one is open', () => {
+    const layout = starterActivityLayout()
+    expect(toQueryRequest(layout, DEFAULT_SETTINGS, null).panels).toEqual([])
+    const req = toQueryRequest(layout, DEFAULT_SETTINGS, 'a7')
+    expect(req.filters).toEqual({ activity_types: ['run', 'ride', 'hike'], activity_ids: ['a7'] })
+    expect(req.panels.map((p) => p.id)).toEqual([layout.panels[0].id, `${layout.panels[0].id}~y2`, layout.panels[1].id, layout.panels[2].id])
+    expect(req.panels.every((p) => p.group_by === 'point')).toBe(true)
   })
 })

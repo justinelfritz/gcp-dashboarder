@@ -17,8 +17,15 @@ export interface FigureContext {
   activityNames?: Map<string, string>
   /** The dashboard's chosen period, so date axes (and the Home button) show all of it. */
   dateWindow?: DateWindow
+  /** Clicking a point opens its activity, so the tooltip says so. */
+  openable?: boolean
 }
 
+/** Index of a point's activity_id in its trace's customdata (null for week and month buckets). */
+export const ACTIVITY_ID_INDEX = 5
+// Above this many points a line drops its markers: a 1 Hz record trace has thousands, and the
+// markers would bury the line.
+export const DENSE_POINTS = 300
 
 
 export interface Figure {
@@ -152,13 +159,17 @@ function buildTraces(
       p.n,
       (p.activity_id && ctx.activityNames?.get(p.activity_id)) || '',
       a.xTime ? '' : `${formatValue(xs[j] as number, a.xUnit!)} ${a.xUnit!.label}`.trim(),
+      p.activity_id ?? null,
+      ctx.openable && p.activity_id ? '<br><i>Click to open this activity</i>' : '',
     ])
     const name = opts.named ? (multi ? `${s.label} · ${a.yLabel}` : a.yLabel) : s.label
     // With two quantities, the hover names each value's quantity rather than relying on color.
     const lead = opts.named ? '%{fullData.name}: ' : ''
+    // Each point of point mode is one row, so a count says nothing there.
+    const count = config.group_by === 'point' ? '' : '  ·  n = %{customdata[2]}'
     const hover = isScatter
-      ? `${lead}<b>%{customdata[0]}</b>%{customdata[1]}<br>%{customdata[4]}<br>%{customdata[3]}<extra>${opts.named ? '' : '%{fullData.name}'}</extra>`
-      : `${lead}<b>%{customdata[0]}</b>%{customdata[1]}  ·  n = %{customdata[2]}<br>%{customdata[3]}<extra></extra>`
+      ? `${lead}<b>%{customdata[0]}</b>%{customdata[1]}<br>%{customdata[4]}<br>%{customdata[3]}%{customdata[6]}<extra>${opts.named ? '' : '%{fullData.name}'}</extra>`
+      : `${lead}<b>%{customdata[0]}</b>%{customdata[1]}${count}<br>%{customdata[3]}%{customdata[6]}<extra></extra>`
     const marker = isBar
       ? { color }
       : opts.secondary
@@ -178,7 +189,7 @@ function buildTraces(
       ...(isBar
         ? {}
         : {
-          mode: isScatter ? 'markers' : 'lines+markers',
+          mode: isScatter ? 'markers' : s.points.length > DENSE_POINTS ? 'lines' : 'lines+markers',
           line: { color, width: 2, ...(opts.secondary ? { dash: config.y2_line ?? 'dash' } : {}) },
         }),
       ...(hasErrors
@@ -292,6 +303,10 @@ export function buildFigure(config: PanelConfig, result: PanelResult, ctx: Figur
     Object.assign(xaxis, { type: 'date', hoverformat: xHoverFormat(config) }, dateAxis(config, all, ctx.dateWindow))
   } else if (a.xUnit?.format === 'clock' && xValues.length) {
     Object.assign(xaxis, clockAxis(xValues, false))
+  } else if (config.x.field === 'lap_index' && xValues.length) {
+    // Lap numbers are counts: whole-number ticks, about eight at most.
+    const span = Math.max(...xValues) - Math.min(...xValues)
+    Object.assign(xaxis, { tick0: 1, dtick: Math.max(1, Math.ceil(span / 8)) })
   }
 
   const legend = two || result.series.length >= 2

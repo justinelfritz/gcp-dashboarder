@@ -490,6 +490,90 @@ main {
   font-variant-numeric: tabular-nums;
 }
 
+/* The analysis-mode switch: two joined buttons, the chosen one filled. */
+.segmented {
+  display: inline-flex;
+}
+
+.segmented button {
+  background: transparent;
+  color: var(--text-primary);
+  border-color: var(--border);
+  border-radius: 0;
+}
+
+.segmented button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.segmented button:last-child {
+  border-radius: 0 4px 4px 0;
+  margin-left: -1px;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+/* ---- Individual activity ---- */
+
+.activity-title h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
+}
+
+.activity-title p {
+  margin: 0.15rem 0 0;
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.stat-tile {
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.stat-tile dt {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.stat-tile dd {
+  margin: 0.2rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-value {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-unit {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.stat-sub {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.picker-table tr.row-current td {
+  background: var(--wash);
+}
+
 button.chip-active {
   border-color: var(--accent);
   color: var(--accent);

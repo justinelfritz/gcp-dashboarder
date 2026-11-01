@@ -3,7 +3,7 @@ import type { PanelResult } from '../api/client'
 import { blankPanel } from '../dashboard/model'
 import { DEFAULT_SETTINGS } from '../dashboard/types'
 import type { PanelConfig } from '../dashboard/types'
-import { buildFigure, buildTable, leastSquares, trendNotes } from './buildFigure'
+import { ACTIVITY_ID_INDEX, buildFigure, buildTable, DENSE_POINTS, leastSquares, trendNotes } from './buildFigure'
 import { DARK, LIGHT } from './palette'
 
 // The trace fields these tests read; Plotly's Data union doesn't narrow on its own.
@@ -45,6 +45,45 @@ const paceResult: PanelResult = {
 }
 
 describe('buildFigure', () => {
+  it('carries each point\'s activity, and says a click opens it when it can', () => {
+    const custom = (data: unknown) => (data as { customdata: unknown[][]; hovertemplate: string }[])[0]
+    const plain = custom(buildFigure(pacePanel, paceResult, ctx).data)
+    expect(plain.customdata.map((c) => c[ACTIVITY_ID_INDEX])).toEqual(['a1', 'a2'])
+    expect(plain.customdata[0].join('')).not.toContain('Click')
+    const openable = custom(buildFigure(pacePanel, paceResult, { ...ctx, openable: true }).data)
+    expect(openable.customdata[0].join('')).toContain('Click to open this activity')
+  })
+
+  it('ticks lap numbers on whole numbers', () => {
+    const panel: PanelConfig = { ...pacePanel, group_by: 'point', error: 'none', x: { field: 'lap_index', level: 'lap' }, series: [{ label: 'This activity', color_slot: 0 }] }
+    const laps = (n: number): PanelResult => ({
+      ...paceResult,
+      x: { field: 'lap_index', label: 'Lap number', unit: '', kind: 'number' },
+      series: [{ label: 'This activity', color: null, n_activities: 1, points: Array.from({ length: n }, (_, i) => ({
+        x: i + 1, y: 400, error: null, n: 1, activity_id: 'a1',
+      })) }],
+    })
+    expect(buildFigure(panel, laps(4), ctx).layout.xaxis).toMatchObject({ tick0: 1, dtick: 1 })
+    expect(buildFigure(panel, laps(27), ctx).layout.xaxis).toMatchObject({ dtick: 4 })
+  })
+
+  it('draws a long per-sample line without markers, and no counts in its tooltip', () => {
+    const panel: PanelConfig = { ...pacePanel, group_by: 'point', error: 'none', series: [{ label: 'This activity', color_slot: 0 }] }
+    const result = (n: number): PanelResult => ({
+      ...paceResult,
+      x: { field: 'elapsed_s', label: 'Time into activity', unit: 's', kind: 'number' },
+      y: { field: 'hr', label: 'Heart rate', unit: 'bpm', kind: 'number' },
+      series: [{ label: 'This activity', color: null, n_activities: 1, points: Array.from({ length: n }, (_, i) => ({
+        x: i, y: 140 + (i % 7), error: null, n: 1, activity_id: 'a1',
+      })) }],
+    })
+    const trace = (n: number) => (buildFigure(panel, result(n), ctx).data as { mode: string; hovertemplate: string }[])[0]
+    expect(trace(DENSE_POINTS + 1).mode).toBe('lines')
+    expect(trace(DENSE_POINTS).mode).toBe('lines+markers')
+    expect(trace(10).hovertemplate).not.toContain('n =')
+    expect((buildFigure(pacePanel, paceResult, ctx).data as { hovertemplate: string }[])[0].hovertemplate).toContain('n =')
+  })
+
   it('converts pace to min/mi, scales error bars, and colors by slot', () => {
     const { data, layout } = buildFigure(pacePanel, paceResult, ctx)
     const [s1, s2] = traces(data)
