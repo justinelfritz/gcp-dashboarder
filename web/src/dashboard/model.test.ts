@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ActivityType } from '../api/client'
-import { dateWindow, isSelected, retitleForTypes, setSelected, starterDashboard, toDisplayFilters, upgradeStarterColors } from './model'
+import { dateWindow, isSelected, retitleForTypes, setSelected, splitBySubtype, starterDashboard, subtypeCounts, toDisplayFilters, toPanelQuery, upgradeStarterColors } from './model'
 import type { DashboardFilters } from './types'
 
 const base: DashboardFilters = { activity_types: ['run'], date_preset: 'all' }
@@ -102,5 +102,30 @@ describe('dateWindow', () => {
     })
     expect(dateWindow({ ...base, date_preset: 'custom' }, now)).toBeUndefined()
     expect(dateWindow({ ...base, date_preset: 'all' }, now)).toBeUndefined()
+  })
+})
+
+describe('subtypes', () => {
+  it('sends subtype choices only for selected sports', () => {
+    const f: DashboardFilters = { ...base, activity_types: ['run'], activity_subtypes: { run: ['trail'], ride: ['gravel'] } }
+    expect(toDisplayFilters(f).activity_subtypes).toEqual({ run: ['trail'] })
+    expect(toDisplayFilters({ ...f, activity_subtypes: { run: [] } }).activity_subtypes).toBeUndefined()
+  })
+
+  it('turns a series subtype into a filter', () => {
+    const p = { ...starterDashboard().panels[0], series: [{ label: 'Trail', color_slot: 0, activity_subtype: 'trail' as const }] }
+    expect(toPanelQuery(p).series?.[0].filters).toEqual([{ field: 'activity_subtype', op: 'eq', value: 'trail' }])
+  })
+
+  it('splits into one series per subtype, most common first, keeping sport and distance', () => {
+    const catalog = { total_activities: 9, levels: { activity: [], lap: [], record: [] },
+      subtypes: { run: { standard: 2, trail: 5 }, ride: { gravel: 2 } } }
+    expect(subtypeCounts(catalog)).toEqual({ standard: 2, trail: 5, gravel: 2 })
+    const counts = subtypeCounts(catalog, 'run')
+    expect(splitBySubtype([{ label: '5k', color_slot: 3, distance_m: 5000, activity_type: 'run' }], counts)).toEqual([
+      { label: 'Trail', color_slot: 0, activity_subtype: 'trail', distance_m: 5000, activity_type: 'run' },
+      { label: 'Standard', color_slot: 1, activity_subtype: 'standard', distance_m: 5000, activity_type: 'run' },
+    ])
+    expect(splitBySubtype([{ label: 'All', color_slot: 0 }], { trail: 4 })).toBeUndefined()
   })
 })

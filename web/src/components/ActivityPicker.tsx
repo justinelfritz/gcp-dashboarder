@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { subtypeLabel } from '../api/client'
 import type { ActivitySummary } from '../api/client'
 import { displayUnit, formatClock } from '../charts/units'
 import { activityLabel } from '../dashboard/hooks'
@@ -8,7 +9,7 @@ import type { ActivitySelection, Settings } from '../dashboard/types'
 const SPORTS: Record<string, string> = { run: 'Run', ride: 'Ride', hike: 'Hike' }
 
 interface Props {
-  /** Activities matching the dashboard's sport and date filters, newest first. */
+  /** Activities matching the dashboard's sport, subtype, and date filters, newest first. */
   activities: ActivitySummary[]
   selection: ActivitySelection | undefined
   settings: Settings
@@ -181,7 +182,10 @@ export default function ActivityPicker({ activities, selection, settings, onAppl
                         timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric', weekday: 'short',
                       })}</td>
                       <td className="picker-name">{activityLabel(a)}</td>
-                      <td>{SPORTS[a.activity_type] ?? a.activity_type}</td>
+                      <td>
+                        {SPORTS[a.activity_type] ?? a.activity_type}
+                        {a.activity_subtype && a.activity_subtype !== 'standard' && ` · ${subtypeLabel(a.activity_subtype)}`}
+                      </td>
                       <td className="num">{a.distance_m == null ? '–' : (a.distance_m * distUnit.factor).toFixed(2)}</td>
                       <td className="num">{time == null ? '–' : formatClock(time)}</td>
                       {onDelete && (

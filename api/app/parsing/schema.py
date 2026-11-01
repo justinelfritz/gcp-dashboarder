@@ -106,6 +106,34 @@ def normalize_activity_type(raw: str | None) -> str:
     return "other"
 
 
+# Finer kinds within a sport, from the source's own type: Garmin FIT "running/trail", Garmin CSV
+# "Trail Running", Strava "Trail Run". Checked in order; "standard" means the source named none
+# (Garmin's plain "Running", "Cycling", "Hiking").
+ACTIVITY_SUBTYPES = ("standard", "trail", "track", "road", "gravel", "mountain", "cyclocross", "e_bike")
+_SUBTYPE_RULES = (
+    ("e bike", "e_bike"),  # before "mountain": "e_bike_mountain" is an e-bike
+    ("e-bike", "e_bike"),
+    ("ebike", "e_bike"),
+    ("trail", "trail"),
+    ("track", "track"),
+    ("gravel", "gravel"),
+    ("unpaved", "gravel"),
+    ("mountain", "mountain"),
+    ("mtb", "mountain"),
+    ("cyclocross", "cyclocross"),
+    ("road", "road"),
+    ("street", "road"),
+)
+
+
+def normalize_activity_subtype(raw: str | None) -> str:
+    lowered = (raw or "").lower().replace("_", " ")
+    for needle, kind in _SUBTYPE_RULES:
+        if needle in lowered:
+            return kind
+    return "standard"
+
+
 def is_indoor_type(raw: str | None) -> bool:
     lowered = (raw or "").lower()
     return any(word in lowered for word in _INDOOR_WORDS)

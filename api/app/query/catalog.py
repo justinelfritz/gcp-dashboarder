@@ -50,6 +50,8 @@ def _pace_from_speed(column: str) -> Callable[[pd.DataFrame], pd.Series]:
 ACTIVITY_FIELDS = [
     Field("start_time", "Date", "datetime", kind="datetime"),
     Field("activity_type", "Activity type", "", kind="category"),
+    # Added to the activities frame by engine.visible_activities, from raw_activity_type.
+    Field("activity_subtype", "Activity subtype", "", kind="category"),
     Field("distance_m", "Distance", "m"),
     Field("duration_s", "Elapsed time", "s"),
     Field("moving_time_s", "Moving time", "s"),

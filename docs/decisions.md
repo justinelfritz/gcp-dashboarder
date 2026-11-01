@@ -318,3 +318,23 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
   policy.
 - **One `REQUIRE_SECOND_FACTOR` switch** feeds both the API and the web build. `ENV=prod` refuses to
   deploy without it unless `ALLOW_PASSWORD_ONLY=1`.
+
+## 2026-11-01: Activity subtypes (trail vs road runs, gravel vs road rides)
+
+- **Derived on read, not stored.** Every activity already keeps its source's own type
+  (`raw_activity_type`: FIT `running/trail`, Garmin CSV "Trail Running", Strava "Trail Run"), so
+  `visible_activities` adds `activity_subtype` from it with substring rules
+  (`normalize_activity_subtype`). Activities uploaded before this get subtypes without
+  re-uploading, and a rule change applies to everything at once.
+- **One shared vocabulary**: `standard` (the source names none: Garmin's plain Running, Cycling,
+  Hiking), `trail`, `track`, `road`, `gravel`, `mountain`, `cyclocross`, `e_bike`. Garmin's
+  generic "Running" isn't assumed to be road; it stays `standard`.
+- **Filtering is per sport**: `DisplayFilters.activity_subtypes` (`{"run": ["trail"]}`) narrows only
+  the sports it lists, so "trail runs plus all rides" works. It's an activity field too, so panel
+  and series filters use the existing `eq` filter.
+- **No new grouping mode**: "Split by subtype" in the panel editor builds one series per subtype
+  (existing series filters, own palette slot each), so colors, legends, the table, and the right
+  axis work unchanged.
+- The dashboard shows a subtype dropdown for a sport only when the data has more than one subtype
+  for it; the field catalog returns the counts. The activity list is narrowed in the browser, so
+  changing the subtype needs no refetch.

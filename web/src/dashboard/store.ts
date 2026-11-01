@@ -1,5 +1,7 @@
 // Dashboards and settings, persisted to localStorage, with validated JSON import/export.
 import { useCallback, useEffect, useState } from 'react'
+import { ACTIVITY_SUBTYPES } from '../api/client'
+import type { ActivitySubtype } from '../api/client'
 import { starterDashboard, upgradeStarterColors } from './model'
 import { DEFAULT_SETTINGS, newId, PALETTE_SIZE, SCHEMA_VERSION } from './types'
 import type { ActivitySelection, Dashboard, PanelConfig, SeriesConfig, Settings } from './types'
@@ -81,7 +83,24 @@ function series(value: unknown, i: number): SeriesConfig {
     ...(TYPES.includes(s.activity_type as string)
       ? { activity_type: s.activity_type as SeriesConfig['activity_type'] }
       : {}),
+    ...(isSubtype(s.activity_subtype) ? { activity_subtype: s.activity_subtype } : {}),
   }
+}
+
+function isSubtype(value: unknown): value is ActivitySubtype {
+  return (ACTIVITY_SUBTYPES as readonly unknown[]).includes(value)
+}
+
+/** Per-sport subtype choices; unknown sports and subtypes are dropped. */
+function subtypeFilters(value: unknown): Dashboard['filters']['activity_subtypes'] {
+  if (typeof value !== 'object' || value === null) return undefined
+  const out: NonNullable<Dashboard['filters']['activity_subtypes']> = {}
+  for (const [sport, list] of Object.entries(value)) {
+    if (!TYPES.includes(sport) || !Array.isArray(list)) continue
+    const subtypes = [...new Set(list.filter(isSubtype))]
+    if (subtypes.length) out[sport as 'run' | 'ride' | 'hike'] = subtypes
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 const ID_PATTERN = /^[a-z]+_[a-z0-9]{1,24}$/
@@ -159,6 +178,7 @@ function dashboardFrom(value: unknown, keepIds: boolean): Dashboard {
       start: typeof filters.start === 'string' ? filters.start : undefined,
       end: typeof filters.end === 'string' ? filters.end : undefined,
       ...(filters.selection !== undefined ? { selection: selection(filters.selection) } : {}),
+      ...(subtypeFilters(filters.activity_subtypes) ? { activity_subtypes: subtypeFilters(filters.activity_subtypes) } : {}),
     },
     panels: data.panels.slice(0, 24).map((p, i) => panel(p, i, keepIds)),
   }

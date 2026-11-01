@@ -237,3 +237,43 @@ def test_series_filter_by_activity_type(client):
     ]}
     p = query(client, sid, panel)["p"]
     assert [s["n_activities"] for s in p["series"]] == [1, 1]
+
+
+@pytest.mark.parametrize(("raw", "subtype"), [
+    ("running", "standard"), ("running/trail", "trail"), ("Trail Running", "trail"),
+    ("Trail Run", "trail"), ("running/track", "track"), ("running/street", "road"),
+    ("cycling/gravel_cycling", "gravel"), ("Gravel/Unpaved Cycling", "gravel"),
+    ("Road Cycling", "road"), ("Mountain Biking", "mountain"), ("Mountain Bike Ride", "mountain"),
+    ("cycling/e_bike_mountain", "e_bike"), ("E-Bike Ride", "e_bike"), ("Cyclocross", "cyclocross"),
+    ("Hiking", "standard"), (None, "standard"),
+])
+def test_subtypes_from_each_source_naming(raw, subtype):
+    from app.parsing.schema import normalize_activity_subtype
+    assert normalize_activity_subtype(raw) == subtype
+
+
+def test_subtype_filters_counts_and_series(client):
+    sid = make_session(
+        client,
+        run(5, day=0, sub_sport="trail"),
+        run(5, day=1, sub_sport="trail"),
+        run(5, day=2),
+        run(10, speed=6.0, day=3, sport="cycling", sub_sport="gravel_cycling"),
+    )
+    fields = client.get(f"/sessions/{sid}/fields").json()
+    assert fields["subtypes"] == {"run": {"trail": 2, "standard": 1}, "ride": {"gravel": 1}}
+    acts = client.get(f"/sessions/{sid}/activities").json()["items"]
+    assert sorted(a["activity_subtype"] for a in acts) == ["gravel", "standard", "trail", "trail"]
+
+    panel = {"id": "n", "group_by": "month", "y": {"field": "distance_m", "agg": "count"}}
+    # Trail runs only; rides aren't narrowed.
+    out = query(client, sid, panel, filters={
+        "activity_types": ["run", "ride"], "activity_subtypes": {"run": ["trail"]}})
+    assert out["n"]["series"][0]["n_activities"] == 3
+
+    # One series per subtype, as the web app's "split by subtype" builds them.
+    split = {"id": "s", "y": {"field": "distance_m"}, "series": [
+        {"label": s, "filters": [{"field": "activity_subtype", "op": "eq", "value": s}]}
+        for s in ("trail", "standard")]}
+    out = query(client, sid, split, filters={"activity_types": ["run"]})
+    assert [s["n_activities"] for s in out["s"]["series"]] == [2, 1]

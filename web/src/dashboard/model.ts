@@ -1,7 +1,8 @@
 // Translating dashboard definitions into API queries, plus starter content.
-import type { ActivityType, DateRange, DisplayFilters, PanelQuery, QueryRequest } from '../api/client'
+import { subtypeLabel } from '../api/client'
+import type { ActivitySubtype, ActivityType, DateRange, DisplayFilters, FieldCatalog, PanelQuery, QueryRequest } from '../api/client'
 import { newId, PALETTE_SIZE, SCHEMA_VERSION } from './types'
-import type { ActivitySelection, Dashboard, DashboardFilters, PanelConfig, Settings } from './types'
+import type { ActivitySelection, Dashboard, DashboardFilters, PanelConfig, SeriesConfig, Settings } from './types'
 
 const PRESET_DAYS: Record<string, number> = {
   last_30: 30,
@@ -43,8 +44,20 @@ export function dateWindow(f: DashboardFilters, now: Date = new Date()): DateWin
   return start === undefined && end === undefined ? undefined : { start, end: end === undefined ? undefined : end + DAY_MS }
 }
 
+/** The subtype choices that apply: only for selected sports, and only non-empty ones. */
+export function activeSubtypes(f: DashboardFilters): NonNullable<DisplayFilters['activity_subtypes']> {
+  const out: NonNullable<DisplayFilters['activity_subtypes']> = {}
+  for (const t of f.activity_types) {
+    const chosen = f.activity_subtypes?.[t]
+    if (chosen?.length) out[t] = chosen
+  }
+  return out
+}
+
 export function toDisplayFilters(f: DashboardFilters): DisplayFilters {
   const out: DisplayFilters = { activity_types: f.activity_types, date_range: toDateRange(f) }
+  const subtypes = activeSubtypes(f)
+  if (Object.keys(subtypes).length) out.activity_subtypes = subtypes
   const sel = f.selection
   if (sel?.mode === 'only') out.activity_ids = sel.ids
   else if (sel?.ids.length) out.exclude_activity_ids = sel.ids
@@ -85,9 +98,39 @@ export function toPanelQuery(p: PanelConfig): PanelQuery {
       filters: [
         ...(s.distance_m ? [{ field: 'distance_m', op: 'near' as const, value: s.distance_m }] : []),
         ...(s.activity_type ? [{ field: 'activity_type', op: 'eq' as const, value: s.activity_type }] : []),
+        ...(s.activity_subtype ? [{ field: 'activity_subtype', op: 'eq' as const, value: s.activity_subtype }] : []),
       ],
     })),
   }
+}
+
+/** Activities per subtype in the catalog's selection: one sport's, or every sport's added up. */
+export function subtypeCounts(catalog: FieldCatalog | null, sport?: ActivityType | null): Partial<Record<ActivitySubtype, number>> {
+  const out: Partial<Record<ActivitySubtype, number>> = {}
+  for (const [t, counts] of Object.entries(catalog?.subtypes ?? {})) {
+    if (sport && t !== sport) continue
+    for (const [s, n] of Object.entries(counts ?? {})) out[s as ActivitySubtype] = (out[s as ActivitySubtype] ?? 0) + (n ?? 0)
+  }
+  return out
+}
+
+/**
+ * One series per subtype, most common first, each keeping the first series' sport and distance
+ * and its own palette slot. Undefined when there's nothing to split (fewer than two subtypes).
+ */
+export function splitBySubtype(series: SeriesConfig[], counts: Partial<Record<ActivitySubtype, number>>): SeriesConfig[] | undefined {
+  const subtypes = (Object.keys(counts) as ActivitySubtype[])
+    .sort((a, b) => (counts[b] ?? 0) - (counts[a] ?? 0))
+    .slice(0, PALETTE_SIZE)
+  if (subtypes.length < 2) return undefined
+  const { distance_m, activity_type } = series[0] ?? {}
+  return subtypes.map((s, i) => ({
+    label: subtypeLabel(s),
+    color_slot: i,
+    activity_subtype: s,
+    ...(distance_m ? { distance_m } : {}),
+    ...(activity_type ? { activity_type } : {}),
+  }))
 }
 
 /**

@@ -23,6 +23,19 @@ describe('dashboard import/export', () => {
     expect(() => parseDashboard(bad)).toThrow(/selection mode/)
   })
 
+  it('round-trips subtype choices, dropping unknown sports and subtypes', () => {
+    const d = starterDashboard()
+    d.filters.activity_subtypes = { run: ['trail'] }
+    d.panels[0] = { ...d.panels[0], series: [{ label: 'Trail', color_slot: 0, activity_subtype: 'trail' }] }
+    const back = parseDashboard(exportDashboard(d))
+    expect(back.filters.activity_subtypes).toEqual({ run: ['trail'] })
+    expect(back.panels[0].series[0].activity_subtype).toBe('trail')
+    const odd = JSON.stringify({ ...JSON.parse(exportDashboard(d)), filters: {
+      activity_types: ['run'], activity_subtypes: { run: ['trail', 'moon', 'trail'], swim: ['pool'] } } })
+    expect(parseDashboard(odd).filters.activity_subtypes).toEqual({ run: ['trail'] })
+    expect(parseDashboard(exportDashboard(starterDashboard())).filters).not.toHaveProperty('activity_subtypes')
+  })
+
   it('round-trips a right-axis quantity, and loads panels without one', () => {
     const d = starterDashboard()
     d.panels[0] = { ...d.panels[0], y2: { field: 'avg_hr', level: 'activity', agg: 'mean' } }
