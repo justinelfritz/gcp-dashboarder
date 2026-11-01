@@ -111,9 +111,12 @@ def normalize_activity_type(raw: str | None) -> str:
 # (Garmin's plain "Running", "Cycling", "Hiking").
 ACTIVITY_SUBTYPES = ("standard", "trail", "track", "road", "gravel", "mountain", "cyclocross", "e_bike")
 _SUBTYPE_RULES = (
-    ("e bike", "e_bike"),  # before "mountain": "e_bike_mountain" is an e-bike
+    # Before "mountain": Garmin "e_bike_mountain" and Strava "E-Mountain Bike Ride" are e-bikes.
+    ("e bike", "e_bike"),
     ("e-bike", "e_bike"),
     ("ebike", "e_bike"),
+    ("e-mountain", "e_bike"),
+    ("emountain", "e_bike"),
     ("trail", "trail"),
     ("track", "track"),
     ("gravel", "gravel"),

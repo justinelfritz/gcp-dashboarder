@@ -245,6 +245,10 @@ def test_series_filter_by_activity_type(client):
     ("cycling/gravel_cycling", "gravel"), ("Gravel/Unpaved Cycling", "gravel"),
     ("Road Cycling", "road"), ("Mountain Biking", "mountain"), ("Mountain Bike Ride", "mountain"),
     ("cycling/e_bike_mountain", "e_bike"), ("E-Bike Ride", "e_bike"), ("Cyclocross", "cyclocross"),
+    # Strava: bulk-export names and API sport_type names.
+    ("Run", "standard"), ("Gravel Ride", "gravel"), ("E-Mountain Bike Ride", "e_bike"),
+    ("TrailRun", "trail"), ("GravelRide", "gravel"), ("MountainBikeRide", "mountain"),
+    ("EMountainBikeRide", "e_bike"),
     ("Hiking", "standard"), (None, "standard"),
 ])
 def test_subtypes_from_each_source_naming(raw, subtype):
