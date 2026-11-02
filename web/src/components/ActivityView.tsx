@@ -9,6 +9,7 @@ import type { useDashboards } from '../dashboard/store'
 import type { Dashboard, DashboardFilters, DashboardKind, PanelConfig, Settings } from '../dashboard/types'
 import ActivityChooser from './ActivityChooser'
 import ActivityStats from './ActivityStats'
+import ControlGroup from './ControlGroup'
 import DashboardToolbar from './DashboardToolbar'
 import PanelEditor from './PanelEditor'
 import PanelGrid from './PanelGrid'
@@ -75,24 +76,28 @@ export default function ActivityView({ scope, store, settings, onSettings, refre
       />
 
       <div className="filters activity-header" role="group" aria-label="Activity">
-        {activity ? (
-          <div className="activity-title">
-            <h2>{activityLabel(activity)}</h2>
-            <p className="status">{startLabel(activity)} · {sportLabel(activity)}</p>
-          </div>
-        ) : (
-          <p className="status">{activities.loaded ? 'No activities yet.' : 'Loading activities…'}</p>
-        )}
+        <ControlGroup title="Activity Details">
+          {activity ? (
+            <div className="activity-title">
+              <h2>{activityLabel(activity)}</h2>
+              <p className="status">{startLabel(activity)} · {sportLabel(activity)}</p>
+            </div>
+          ) : (
+            <p className="status">{activities.loaded ? 'No activities yet.' : 'Loading activities…'}</p>
+          )}
+        </ControlGroup>
         <span className="spacer" />
-        <button type="button" className="secondary" disabled={!older} onClick={() => older && onActivity(older.activity_id)}>
-          ← Older
-        </button>
-        <button type="button" className="secondary" disabled={!newer} onClick={() => newer && onActivity(newer.activity_id)}>
-          Newer →
-        </button>
-        <button type="button" className="secondary" disabled={!activities.loaded} onClick={() => setChoosing(true)}>
-          Choose activity
-        </button>
+        <ControlGroup title="Activity Selection">
+          <button type="button" className="secondary" disabled={!older} onClick={() => older && onActivity(older.activity_id)}>
+            ← Older
+          </button>
+          <button type="button" className="secondary" disabled={!newer} onClick={() => newer && onActivity(newer.activity_id)}>
+            Newer →
+          </button>
+          <button type="button" className="secondary" disabled={!activities.loaded} onClick={() => setChoosing(true)}>
+            Choose activity
+          </button>
+        </ControlGroup>
         <UnitsSelect settings={settings} onSettings={onSettings} />
       </div>
 

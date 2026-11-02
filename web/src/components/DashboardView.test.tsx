@@ -105,6 +105,14 @@ describe('DashboardView', () => {
     expect(req.filters?.activity_types).toEqual(['run'])
   })
 
+  it('titles the viewing mode, dashboard, and activity selection controls', async () => {
+    render(<Harness />)
+    await screen.findAllByTestId('chart')
+    expect(within(screen.getByRole('group', { name: 'Viewing Mode' })).getByRole('button', { name: 'Aggregate activities' })).toBeInTheDocument()
+    expect(within(screen.getByRole('group', { name: 'Dashboard Controls' })).getByRole('button', { name: 'Import' })).toBeInTheDocument()
+    expect(within(screen.getByRole('group', { name: 'Activity Selection' })).getByLabelText('Date range')).toBeInTheDocument()
+  })
+
   it('narrows runs to one subtype, in the query and the activity count', async () => {
     render(<Harness />)
     await screen.findAllByTestId('chart')
@@ -242,6 +250,9 @@ describe('DashboardView', () => {
       await waitFor(() => expect(lastRequest().filters?.activity_ids).toEqual(['a3']))
       expect(lastRequest().panels.every((p) => p.group_by === 'point')).toBe(true)
       expect(screen.getByRole('toolbar', { name: 'Activity layout' })).toBeInTheDocument()
+      expect(screen.getByRole('group', { name: 'Layout Controls' })).toBeInTheDocument()
+      expect(within(screen.getByRole('group', { name: 'Activity Details' })).getByRole('heading', { name: 'Run 3' })).toBeInTheDocument()
+      expect(within(screen.getByRole('group', { name: 'Activity Selection' })).getByRole('button', { name: 'Choose activity' })).toBeInTheDocument()
       expect(within(screen.getByLabelText('Activity summary')).getByText('Average heart rate')).toBeInTheDocument()
       expect(await screen.findAllByTestId('chart')).toHaveLength(3)
     })
@@ -267,6 +278,13 @@ describe('DashboardView', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Run 2' }))
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       await screen.findByRole('heading', { name: 'Run 2' })
+
+      // Anywhere on the row opens it, not just the name.
+      fireEvent.click(screen.getByRole('button', { name: 'Choose activity' }))
+      const row = within(screen.getByRole('dialog')).getByRole('button', { name: 'Run 1' }).closest('tr')!
+      fireEvent.click(row.cells[0])
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      await screen.findByRole('heading', { name: 'Run 1' })
     })
 
     it('opens a point clicked in an aggregate chart', async () => {

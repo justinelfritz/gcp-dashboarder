@@ -2,6 +2,7 @@ import type { useDashboards } from '../dashboard/store'
 import type { DashboardKind, Settings } from '../dashboard/types'
 import ActivityView from './ActivityView'
 import AggregateView from './AggregateView'
+import ControlGroup from './ControlGroup'
 
 const MODES: { value: DashboardKind; label: string }[] = [
   { value: 'aggregate', label: 'Aggregate activities' },
@@ -24,13 +25,15 @@ interface Props {
 /** The Dashboard tab: many activities compared, or one activity inspected. */
 export default function DashboardView({ mode, onMode, activityId, onActivity, ...shared }: Props) {
   const modeSwitch = (
-    <div className="segmented" role="group" aria-label="Analysis mode">
-      {MODES.map((m) => (
-        <button key={m.value} type="button" aria-pressed={mode === m.value} onClick={() => onMode(m.value)}>
-          {m.label}
-        </button>
-      ))}
-    </div>
+    <ControlGroup title="Viewing Mode">
+      <div className="segmented">
+        {MODES.map((m) => (
+          <button key={m.value} type="button" aria-pressed={mode === m.value} onClick={() => onMode(m.value)}>
+            {m.label}
+          </button>
+        ))}
+      </div>
+    </ControlGroup>
   )
   return mode === 'activity' ? (
     <ActivityView {...shared} modeSwitch={modeSwitch} activityId={activityId} onActivity={onActivity} onMode={onMode} />

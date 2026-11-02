@@ -81,11 +81,12 @@ export default function ActivityChooser({ activities, currentId, settings, onCho
                   const time = a.moving_time_s ?? a.duration_s
                   const current = a.activity_id === currentId
                   return (
-                    <tr key={a.activity_id} className={current ? 'row-current' : undefined}>
+                    // The whole row opens the activity; the name's button keeps it reachable by keyboard.
+                    <tr key={a.activity_id} className={current ? 'row-choosable row-current' : 'row-choosable'}
+                      onClick={() => onChoose(a.activity_id)}>
                       <td>{dayLabel(a)}</td>
                       <td className="picker-name">
-                        <button type="button" className="link" aria-current={current || undefined}
-                          onClick={() => onChoose(a.activity_id)}>
+                        <button type="button" className="link" aria-current={current || undefined}>
                           {activityLabel(a)}
                         </button>
                       </td>

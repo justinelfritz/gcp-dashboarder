@@ -5,6 +5,7 @@ import { DashboardImportError, exportDashboard, parseDashboard } from '../dashbo
 import type { useDashboards } from '../dashboard/store'
 import { newId } from '../dashboard/types'
 import type { Dashboard, DashboardKind } from '../dashboard/types'
+import ControlGroup from './ControlGroup'
 
 interface Props {
   store: ReturnType<typeof useDashboards>
@@ -53,23 +54,25 @@ export default function DashboardToolbar({ store, dashboard, lead, onAddPanel, o
   return (
     <div className="toolbar" role="toolbar" aria-label={label}>
       {lead}
-      <select aria-label={label} value={dashboard.id} onChange={(e) => store.select(e.target.value)}>
-        {sameKind.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-      </select>
-      <button type="button" className="link" onClick={() => {
-        const name = window.prompt(`${label} name`, dashboard.name)
-        if (name) store.update({ ...dashboard, name: name.slice(0, 80) })
-      }}>Rename</button>
-      <button type="button" className="link" onClick={addNew}>New</button>
-      <button type="button" className="link" onClick={() => {
-        if (window.confirm(`Delete "${dashboard.name}"?`)) store.remove(dashboard.id)
-      }}>Delete</button>
-      <button type="button" className="link" onClick={download}>Export</button>
-      <button type="button" className="link" onClick={() => importRef.current?.click()}>Import</button>
-      <input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(e) => {
-        void importFile(e.target.files?.[0])
-        e.target.value = ''
-      }} />
+      <ControlGroup title={kind === 'activity' ? 'Layout Controls' : 'Dashboard Controls'}>
+        <select aria-label={label} value={dashboard.id} onChange={(e) => store.select(e.target.value)}>
+          {sameKind.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <button type="button" className="link" onClick={() => {
+          const name = window.prompt(`${label} name`, dashboard.name)
+          if (name) store.update({ ...dashboard, name: name.slice(0, 80) })
+        }}>Rename</button>
+        <button type="button" className="link" onClick={addNew}>New</button>
+        <button type="button" className="link" onClick={() => {
+          if (window.confirm(`Delete "${dashboard.name}"?`)) store.remove(dashboard.id)
+        }}>Delete</button>
+        <button type="button" className="link" onClick={download}>Export</button>
+        <button type="button" className="link" onClick={() => importRef.current?.click()}>Import</button>
+        <input ref={importRef} type="file" accept="application/json,.json" hidden onChange={(e) => {
+          void importFile(e.target.files?.[0])
+          e.target.value = ''
+        }} />
+      </ControlGroup>
       <span className="spacer" />
       <button type="button" onClick={onAddPanel}>Add panel</button>
     </div>

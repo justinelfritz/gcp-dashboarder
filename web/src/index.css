@@ -211,7 +211,7 @@ main {
   align-items: center;
   gap: 0.5rem 0.75rem;
   margin-bottom: 0.75rem;
-  font-size: 0.875rem;
+  font-size: 1rem;
 }
 
 .filters {
@@ -222,6 +222,48 @@ main {
 
 .spacer {
   flex: 1;
+}
+
+/* A titled, boxed cluster. Boxes in a row stretch to one height, titles at the top. */
+.toolbar,
+.filters {
+  align-items: stretch;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* Controls outside a box sit level with the controls inside one (its bottom padding + border). */
+.toolbar > :not(.control-group),
+.filters > :not(.control-group) {
+  align-self: flex-end;
+  margin-bottom: calc(0.6rem + 1px);
+}
+
+.control-group-body > p {
+  margin: 0;
+}
+
+.control-group-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.control-group-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  /* As tall as a button, so titles line up across groups whatever their controls. */
+  min-height: 2rem;
 }
 
 .inline {
@@ -571,6 +613,14 @@ main {
 }
 
 .picker-table tr.row-current td {
+  background: var(--wash);
+}
+
+.picker-table tr.row-choosable {
+  cursor: pointer;
+}
+
+.picker-table tr.row-choosable:hover td {
   background: var(--wash);
 }
 

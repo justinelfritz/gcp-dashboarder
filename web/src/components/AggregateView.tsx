@@ -9,6 +9,7 @@ import { blankPanel, dateWindow, isSelected, retitleForTypes } from '../dashboar
 import type { useDashboards } from '../dashboard/store'
 import type { Dashboard, DashboardKind, DatePreset, PanelConfig, Settings } from '../dashboard/types'
 import ActivityPicker from './ActivityPicker'
+import ControlGroup from './ControlGroup'
 import DashboardToolbar from './DashboardToolbar'
 import PanelEditor from './PanelEditor'
 import PanelGrid from './PanelGrid'
@@ -96,78 +97,80 @@ export default function AggregateView({ scope, store, settings, onSettings, refr
       />
 
       <div className="filters" role="group" aria-label="Filters">
-        <select aria-label="Date range" value={dashboard.filters.date_preset}
-          onChange={(e) => setFilters({ date_preset: e.target.value as DatePreset })}>
-          {DATE_PRESETS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-        </select>
-        {dashboard.filters.date_preset === 'custom' && (
-          <>
-            <input type="date" aria-label="Start date" value={dashboard.filters.start ?? ''}
-              onChange={(e) => setFilters({ start: e.target.value })} />
-            <input type="date" aria-label="End date" value={dashboard.filters.end ?? ''}
-              onChange={(e) => setFilters({ end: e.target.value })} />
-          </>
-        )}
-        {TYPES.map((t) => (
-          <label key={t.value} className="inline">
-            <input
-              type="checkbox"
-              checked={dashboard.filters.activity_types.includes(t.value)}
-              onChange={(e) => {
-                const types = e.target.checked
-                  ? [...dashboard.filters.activity_types, t.value]
-                  : dashboard.filters.activity_types.filter((x) => x !== t.value)
-                if (types.length) {
-                  update({
-                    filters: { ...dashboard.filters, activity_types: types },
-                    panels: retitleForTypes(dashboard.panels, types),
-                  })
-                }
-              }}
-            />
-            {t.label}
-          </label>
-        ))}
-        {TYPES.filter((t) => dashboard.filters.activity_types.includes(t.value)).map((t) => {
-          // Offered once the data has more than one subtype for the sport (trail and standard runs).
-          const counts = catalog?.subtypes?.[t.value] ?? {}
-          const chosen = dashboard.filters.activity_subtypes?.[t.value]?.[0] ?? ''
-          const options = Object.keys(counts) as ActivitySubtype[]
-          if (options.length < 2 && !chosen) return null
-          return (
-            <select
-              key={t.value}
-              aria-label={`${t.label} subtype`}
-              title={STANDARD_SUBTYPE_HINT}
-              className={chosen ? 'chip-active' : undefined}
-              value={chosen}
-              onChange={(e) => {
-                const rest = { ...dashboard.filters.activity_subtypes }
-                if (e.target.value) rest[t.value] = [e.target.value as ActivitySubtype]
-                else delete rest[t.value]
-                setFilters({ activity_subtypes: Object.keys(rest).length ? rest : undefined })
-              }}
-            >
-              <option value="">All {t.label.toLowerCase()}</option>
-              {chosen && !options.includes(chosen as ActivitySubtype) && (
-                <option value={chosen}>{subtypeLabel(chosen)} {t.label.toLowerCase()} (0)</option>
-              )}
-              {options.map((s) => (
-                <option key={s} value={s}>{subtypeLabel(s)} {t.label.toLowerCase()} ({counts[s]})</option>
-              ))}
-            </select>
-          )
-        })}
-        <button
-          type="button"
-          className={selectedCount < activities.items.length || selection?.mode === 'only' ? 'secondary chip-active' : 'secondary'}
-          onClick={() => setPicking(true)}
-          disabled={!activities.loaded}
-        >
-          {selectedCount === activities.items.length
-            ? `All ${activities.items.length} activities`
-            : `${selectedCount} of ${activities.items.length} activities`}
-        </button>
+        <ControlGroup title="Activity Selection">
+          <select aria-label="Date range" value={dashboard.filters.date_preset}
+            onChange={(e) => setFilters({ date_preset: e.target.value as DatePreset })}>
+            {DATE_PRESETS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
+          {dashboard.filters.date_preset === 'custom' && (
+            <>
+              <input type="date" aria-label="Start date" value={dashboard.filters.start ?? ''}
+                onChange={(e) => setFilters({ start: e.target.value })} />
+              <input type="date" aria-label="End date" value={dashboard.filters.end ?? ''}
+                onChange={(e) => setFilters({ end: e.target.value })} />
+            </>
+          )}
+          {TYPES.map((t) => (
+            <label key={t.value} className="inline">
+              <input
+                type="checkbox"
+                checked={dashboard.filters.activity_types.includes(t.value)}
+                onChange={(e) => {
+                  const types = e.target.checked
+                    ? [...dashboard.filters.activity_types, t.value]
+                    : dashboard.filters.activity_types.filter((x) => x !== t.value)
+                  if (types.length) {
+                    update({
+                      filters: { ...dashboard.filters, activity_types: types },
+                      panels: retitleForTypes(dashboard.panels, types),
+                    })
+                  }
+                }}
+              />
+              {t.label}
+            </label>
+          ))}
+          {TYPES.filter((t) => dashboard.filters.activity_types.includes(t.value)).map((t) => {
+            // Offered once the data has more than one subtype for the sport (trail and standard runs).
+            const counts = catalog?.subtypes?.[t.value] ?? {}
+            const chosen = dashboard.filters.activity_subtypes?.[t.value]?.[0] ?? ''
+            const options = Object.keys(counts) as ActivitySubtype[]
+            if (options.length < 2 && !chosen) return null
+            return (
+              <select
+                key={t.value}
+                aria-label={`${t.label} subtype`}
+                title={STANDARD_SUBTYPE_HINT}
+                className={chosen ? 'chip-active' : undefined}
+                value={chosen}
+                onChange={(e) => {
+                  const rest = { ...dashboard.filters.activity_subtypes }
+                  if (e.target.value) rest[t.value] = [e.target.value as ActivitySubtype]
+                  else delete rest[t.value]
+                  setFilters({ activity_subtypes: Object.keys(rest).length ? rest : undefined })
+                }}
+              >
+                <option value="">All {t.label.toLowerCase()}</option>
+                {chosen && !options.includes(chosen as ActivitySubtype) && (
+                  <option value={chosen}>{subtypeLabel(chosen)} {t.label.toLowerCase()} (0)</option>
+                )}
+                {options.map((s) => (
+                  <option key={s} value={s}>{subtypeLabel(s)} {t.label.toLowerCase()} ({counts[s]})</option>
+                ))}
+              </select>
+            )
+          })}
+          <button
+            type="button"
+            className={selectedCount < activities.items.length || selection?.mode === 'only' ? 'secondary chip-active' : 'secondary'}
+            onClick={() => setPicking(true)}
+            disabled={!activities.loaded}
+          >
+            {selectedCount === activities.items.length
+              ? `All ${activities.items.length} activities`
+              : `${selectedCount} of ${activities.items.length} activities`}
+          </button>
+        </ControlGroup>
         <span className="spacer" />
         <UnitsSelect settings={settings} onSettings={onSettings} />
         <label className="inline">
