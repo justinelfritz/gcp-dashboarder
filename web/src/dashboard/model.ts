@@ -2,7 +2,7 @@
 import { subtypeLabel } from '../api/client'
 import type { ActivitySubtype, ActivityType, DateRange, DisplayFilters, FieldCatalog, PanelQuery, QueryRequest } from '../api/client'
 import { newId, PALETTE_SIZE, SCHEMA_VERSION } from './types'
-import type { ActivitySelection, Dashboard, DashboardFilters, PanelConfig, SeriesConfig, Settings } from './types'
+import type { ActivitySelection, Dashboard, DashboardFilters, DashboardKind, PanelConfig, SeriesConfig, Settings } from './types'
 
 const PRESET_DAYS: Record<string, number> = {
   last_30: 30,
@@ -147,12 +147,20 @@ export function y2Slots(p: Pick<PanelConfig, 'series'>): number[] {
 /** Id suffix of the companion query that fetches a panel's right-axis quantity. */
 export const Y2_SUFFIX = '~y2'
 
-export function toQueryRequest(d: Dashboard, settings: Settings): QueryRequest {
+export const kindOf = (d: Pick<Dashboard, 'kind'>): DashboardKind => d.kind ?? 'aggregate'
+
+/**
+ * The request for every panel. An activity layout queries just the open activity (whatever its
+ * sport or date), and nothing until one is open.
+ */
+export function toQueryRequest(d: Dashboard, settings: Settings, activityId?: string | null): QueryRequest {
+  const single = kindOf(d) === 'activity'
+  const panels = single && !activityId ? [] : d.panels
   return {
-    filters: toDisplayFilters(d.filters),
+    filters: single ? { activity_types: ['run', 'ride', 'hike'], activity_ids: activityId ? [activityId] : [] } : toDisplayFilters(d.filters),
     // The right-axis quantity is its own query: the same panel with y swapped, so the API needs no
     // notion of a second axis.
-    panels: d.panels.flatMap((p) => {
+    panels: panels.flatMap((p) => {
       const q = toPanelQuery(p)
       return p.y2 ? [q, { ...q, id: p.id + Y2_SUFFIX, y: p.y2 }] : [q]
     }),
@@ -184,6 +192,64 @@ export function blankPanel(y: number): PanelConfig {
     error: 'none',
     series: [{ label: 'All', color_slot: 0 }],
     layout: { x: 0, y, w: 6, h: 7 },
+  }
+}
+
+/** The one series of an activity layout's panel: the open activity, no filters. */
+export function activitySeries(color_slot = 0): SeriesConfig[] {
+  return [{ label: 'This activity', color_slot }]
+}
+
+/** A new panel for an activity layout: heart rate over the activity's time. */
+export function blankActivityPanel(y: number): PanelConfig {
+  return {
+    ...blankPanel(y),
+    group_by: 'point',
+    x: { field: 'elapsed_s', level: 'record' },
+    y: { field: 'hr', level: 'record', agg: 'mean' },
+    series: activitySeries(),
+    layout: { x: 0, y, w: 6, h: 7 },
+  }
+}
+
+/** The layout a new user sees in individual activity mode. */
+export function starterActivityLayout(): Dashboard {
+  return {
+    schema_version: SCHEMA_VERSION,
+    id: newId('dash'),
+    kind: 'activity',
+    name: 'Activity overview',
+    filters: { activity_types: ['run', 'ride', 'hike'], date_preset: 'all' },
+    panels: [
+      {
+        ...blankActivityPanel(0),
+        id: newId('p'),
+        title: 'Pace and heart rate',
+        y: { field: 'pace_s_per_km', level: 'record', agg: 'mean' },
+        y2: { field: 'hr', level: 'record', agg: 'mean' },
+        layout: { x: 0, y: 0, w: 12, h: 8 },
+      },
+      {
+        ...blankActivityPanel(0),
+        id: newId('p'),
+        title: 'Elevation',
+        x: { field: 'distance_m', level: 'record' },
+        y: { field: 'altitude', level: 'record', agg: 'mean' },
+        series: activitySeries(5),
+        layout: { x: 0, y: 8, w: 6, h: 7 },
+      },
+      {
+        ...blankActivityPanel(0),
+        id: newId('p'),
+        title: 'Pace per mile split',
+        lap_kind: 'split_mi',
+        include_partial_laps: true,
+        x: { field: 'lap_index', level: 'lap' },
+        y: { field: 'avg_pace_s_per_km', level: 'lap', agg: 'mean' },
+        series: activitySeries(2),
+        layout: { x: 6, y: 8, w: 6, h: 7 },
+      },
+    ],
   }
 }
 

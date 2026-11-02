@@ -14,11 +14,18 @@ const message = (err: unknown) => (err instanceof Error ? err.message : String(e
  * the query, so dragging or renaming a panel doesn't refetch. While loading, the previous
  * results stay on screen.
  */
-export function usePanelResults(scope: string, dashboard: Dashboard, settings: Settings, refreshKey: number) {
+export function usePanelResults(
+  scope: string,
+  dashboard: Dashboard,
+  settings: Settings,
+  refreshKey: number,
+  /** The open activity, for an activity layout. */
+  activityId?: string | null,
+) {
   const [results, setResults] = useState<Map<string, PanelResult>>(new Map())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const requestKey = JSON.stringify(toQueryRequest(dashboard, settings))
+  const requestKey = JSON.stringify(toQueryRequest(dashboard, settings, activityId))
 
   useEffect(() => {
     const request = JSON.parse(requestKey) as QueryRequest

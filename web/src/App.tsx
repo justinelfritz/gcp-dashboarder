@@ -6,7 +6,7 @@ import { useAuth } from './auth/useAuth'
 import AccountMenu from './components/AccountMenu'
 import DashboardView from './components/DashboardView'
 import UploadPanel from './components/UploadPanel'
-import { forgetOwner, useDashboards, useSettings } from './dashboard/store'
+import { forgetOwner, useDashboardMode, useDashboards, useSettings } from './dashboard/store'
 import { useAccountSync } from './dashboard/sync'
 
 type ApiStatus = 'checking' | 'ok' | 'error'
@@ -25,6 +25,10 @@ export default function App() {
   const store = useDashboards(owner)
   const [settings, setSettings] = useSettings(owner)
   const sync = useAccountSync(owner, store.saved, settings, store.replace, setSettings)
+  const [mode, setMode] = useDashboardMode()
+  // The activity open in individual mode, kept while on Load Data; it belongs to one scope.
+  const [opened, setOpened] = useState<{ scope: Scope; id: string } | null>(null)
+  const activityId = opened && opened.scope === scope ? opened.id : null
   // Until a new account finishes setup (verified email, authenticator if required), the app stays a guest.
   const authSettled = auth.state.status !== 'loading'
 
@@ -133,6 +137,10 @@ export default function App() {
             settings={settings}
             onSettings={setSettings}
             refreshKey={refreshKey}
+            mode={mode}
+            onMode={setMode}
+            activityId={activityId}
+            onActivity={(id) => scope && setOpened({ scope, id })}
           />
         )}
       </main>

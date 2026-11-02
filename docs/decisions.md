@@ -338,3 +338,28 @@ Scope and design agreed for custom multi-panel displays. Format reference: `docs
 - The dashboard shows a subtype dropdown for a sport only when the data has more than one subtype
   for it; the field catalog returns the counts. The activity list is narrowed in the browser, so
   changing the subtype needs no refetch.
+
+## 2026-11-01: Individual activity mode
+
+- **Two modes in the Dashboard tab** ("Aggregate activities" / "Individual activity"), not a new
+  top-level tab: both use the same panels, editor, charts, and saving, and clicking a point in an
+  aggregate chart opens that activity, which works best when both live in one place.
+- **A fixed layout redraws for whichever activity is open**, rather than panels built per
+  activity. Layouts are dashboards with `kind: "activity"` in the same saved list, so rename, new,
+  delete, export/import, and account sync needed no new code. `kind` is optional (absent means
+  aggregate), so `schema_version` stays 1. The open layout is `activeLayoutId`, beside
+  `activeId`; everyone gets a starter layout ("Activity overview") if they have none.
+- **No API change**: a layout's request is filtered to `activity_ids: [<open activity>]`, and its
+  panels are always point mode (one point per lap or sample) with a single unfiltered series.
+  Import and sync normalize panels to that, and the editor hides grouping, error bars, and
+  series, and offers only lap and per-second fields.
+- The mode is remembered per browser, not synced; the open activity defaults to the newest.
+  Activities with summary data only (CSV rows) show their summary and a note instead of charts.
+- Line charts with more than 300 points drop their markers, so per-second traces stay readable.
+- **Known risk:** a tab still running the previous build saves without `kind`, turning layouts into
+  aggregate dashboards. `index.html` is revalidated, so reloading picks up the new build. Bumping
+  the schema version would be worse: old builds would treat the account copy as unreadable and
+  upload their own over it.
+- **Later:** overlaying a second activity (this run vs last week's), and a GPS route map (needs
+  coordinates stored and exposed, and a privacy review, since it's location data).
+

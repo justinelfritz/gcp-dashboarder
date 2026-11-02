@@ -117,6 +117,13 @@ Weekly distance:
 { "id": "weekly", "group_by": "week", "y": { "field": "distance_m", "agg": "sum" } }
 ```
 
+One activity's heart rate over time, as the web app's individual activity mode sends it: the
+request's `filters` are `{ "activity_ids": ["<id>"] }`, and every panel is in point mode:
+
+```json
+{ "id": "hr", "group_by": "point", "x": { "field": "elapsed_s", "level": "record" }, "y": { "field": "hr", "level": "record" } }
+```
+
 ## Response
 
 Each panel returns `x`/`y` axis info (label, unit), `series` of `points`

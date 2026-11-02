@@ -23,11 +23,13 @@ interface Props {
   panel: PanelConfig
   catalog: FieldCatalog | null
   settings: Settings
+  /** A panel of an activity layout: one activity's laps or samples, so no grouping or series. */
+  single?: boolean
   onSave: (p: PanelConfig) => void
   onCancel: () => void
 }
 
-export default function PanelEditor({ panel, catalog, settings, onSave, onCancel }: Props) {
+export default function PanelEditor({ panel, catalog, settings, single = false, onSave, onCancel }: Props) {
   const [p, setP] = useState<PanelConfig>(panel)
   const dialogRef = useRef<HTMLDivElement>(null)
   const set = (patch: Partial<PanelConfig>) => setP((cur) => ({ ...cur, ...patch }))
@@ -48,8 +50,10 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
       return f.kind === 'number' || level === 'activity' || p.group_by === 'point'
     })
 
+  // One activity's summary is a single number, so an activity layout plots laps or samples.
+  const levels = (Object.keys(LEVEL_LABELS) as Level[]).filter((l) => !single || l !== 'activity')
   // In point mode every axis must share one row level (or be activity-level).
-  const y2Levels = (Object.keys(LEVEL_LABELS) as Level[]).filter((l) => {
+  const y2Levels = levels.filter((l) => {
     if (p.group_by !== 'point' || l === 'activity') return true
     const rowLevel = [p.x.level, p.y.level].find((v) => v && v !== 'activity')
     return !rowLevel || rowLevel === l
@@ -119,28 +123,31 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
             ))}
           </fieldset>
 
-          <label className="field">
-            Each point is
-            <select
-              value={p.group_by}
-              onChange={(e) => {
-                const group_by = e.target.value as PanelConfig['group_by']
-                const patch: Partial<PanelConfig> = { group_by }
-                if (group_by === 'point' && p.y.level !== 'activity' && p.x.level !== 'activity' && p.x.level !== p.y.level) {
-                  patch.x = { ...p.x, level: p.y.level, field: fieldsAt(p.y.level ?? 'activity', 'x')[0]?.name ?? p.x.field }
-                }
-                set(patch)
-              }}
-            >
-              {GROUP_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </label>
+          {!single && (
+            <label className="field">
+              Each point is
+              <select
+                value={p.group_by}
+                onChange={(e) => {
+                  const group_by = e.target.value as PanelConfig['group_by']
+                  const patch: Partial<PanelConfig> = { group_by }
+                  if (group_by === 'point' && p.y.level !== 'activity' && p.x.level !== 'activity' && p.x.level !== p.y.level) {
+                    patch.x = { ...p.x, level: p.y.level, field: fieldsAt(p.y.level ?? 'activity', 'x')[0]?.name ?? p.x.field }
+                  }
+                  set(patch)
+                }}
+              >
+                {GROUP_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </label>
+          )}
 
           {!timeGrouped && (
             <AxisFields
               title="X axis"
               axis={p.x}
               fields={fieldsAt(p.x.level ?? 'activity', 'x')}
+              levels={levels}
               total={total}
               showAgg={showXAgg}
               onLevel={(l) => changeLevel('x', l)}
@@ -151,6 +158,7 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
             title="Y axis"
             axis={p.y}
             fields={fieldsAt(p.y.level ?? 'activity', 'y')}
+            levels={levels}
             total={total}
             showAgg={showYAgg}
             onLevel={(l) => changeLevel('y', l)}
@@ -180,80 +188,90 @@ export default function PanelEditor({ panel, catalog, settings, onSave, onCancel
             </fieldset>
           )}
 
-          <label className="field">
-            Error bars
-            <select
-              value={showYAgg ? p.error : 'none'}
-              disabled={!showYAgg}
-              onChange={(e) => set({ error: e.target.value as PanelConfig['error'] })}
-            >
-              <option value="none">None</option>
-              <option value="std">Standard deviation</option>
-              <option value="sem">Standard error</option>
-            </select>
-            {!showYAgg && <span className="hint">Needs a lap or per-second y axis, or weekly/monthly points.</span>}
-          </label>
+          {!single && (
+            <label className="field">
+              Error bars
+              <select
+                value={showYAgg ? p.error : 'none'}
+                disabled={!showYAgg}
+                onChange={(e) => set({ error: e.target.value as PanelConfig['error'] })}
+              >
+                <option value="none">None</option>
+                <option value="std">Standard deviation</option>
+                <option value="sem">Standard error</option>
+              </select>
+              {!showYAgg && <span className="hint">Needs a lap or per-second y axis, or weekly/monthly points.</span>}
+            </label>
+          )}
 
-          <fieldset>
-            <legend>Series</legend>
-            {p.series.map((s, i) => (
-              <div className="series-row" key={i}>
-                <input aria-label={`Series ${i + 1} label`} value={s.label} onChange={(e) => setSeries(i, { label: e.target.value })} />
-                <Swatches colors={theme.series} label={`Series ${i + 1} color`} value={s.color_slot}
-                  onChange={(color_slot) => setSeries(i, { color_slot })} />
-                <select
-                  aria-label={`Series ${i + 1} sport`}
-                  value={s.activity_type ?? ''}
-                  onChange={(e) => setSeries(i, { activity_type: (e.target.value || null) as SeriesConfig['activity_type'] })}
-                >
-                  <option value="">All sports</option>
-                  <option value="run">Runs</option>
-                  <option value="ride">Rides</option>
-                  <option value="hike">Hikes</option>
-                </select>
-                {(subtypesFor(s.activity_type).length > 1 || s.activity_subtype) && (
+          {single ? (
+            <fieldset className="row">
+              <legend>Line color</legend>
+              <Swatches colors={theme.series} label="Line color" value={p.series[0]?.color_slot ?? 0}
+                onChange={(color_slot) => setSeries(0, { color_slot })} />
+            </fieldset>
+          ) : (
+            <fieldset>
+              <legend>Series</legend>
+              {p.series.map((s, i) => (
+                <div className="series-row" key={i}>
+                  <input aria-label={`Series ${i + 1} label`} value={s.label} onChange={(e) => setSeries(i, { label: e.target.value })} />
+                  <Swatches colors={theme.series} label={`Series ${i + 1} color`} value={s.color_slot}
+                    onChange={(color_slot) => setSeries(i, { color_slot })} />
                   <select
-                    aria-label={`Series ${i + 1} subtype`}
-                    title={STANDARD_SUBTYPE_HINT}
-                    value={s.activity_subtype ?? ''}
-                    onChange={(e) => setSeries(i, { activity_subtype: (e.target.value || null) as SeriesConfig['activity_subtype'] })}
+                    aria-label={`Series ${i + 1} sport`}
+                    value={s.activity_type ?? ''}
+                    onChange={(e) => setSeries(i, { activity_type: (e.target.value || null) as SeriesConfig['activity_type'] })}
                   >
-                    <option value="">Any subtype</option>
-                    {s.activity_subtype && !subtypesFor(s.activity_type).includes(s.activity_subtype) && (
-                      <option value={s.activity_subtype}>{subtypeLabel(s.activity_subtype)}</option>
-                    )}
-                    {subtypesFor(s.activity_type).map((t) => <option key={t} value={t}>{subtypeLabel(t)}</option>)}
+                    <option value="">All sports</option>
+                    <option value="run">Runs</option>
+                    <option value="ride">Rides</option>
+                    <option value="hike">Hikes</option>
                   </select>
-                )}
-                <DistancePicker
-                  value={s.distance_m ?? null}
-                  units={settings.units}
-                  tolerance={settings.distance_tolerance}
-                  onChange={(distance_m) => setSeries(i, { distance_m })}
-                />
-                {p.series.length > 1 && (
-                  <button type="button" className="link" onClick={() => set({ series: p.series.filter((_, j) => j !== i) })}>
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-            {p.series.length < PALETTE_SIZE && (
-              <button type="button" className="secondary" onClick={addSeries}>Add series</button>
-            )}
-            {split && (
-              <button type="button" className="secondary" onClick={() => set({ series: split })}
-                title="Replace the series with one per subtype, e.g. trail runs and standard runs as separate lines">
-                Split by subtype
-              </button>
-            )}
-            {p.chart === 'scatter' && p.series.length > SCATTER_SERIES_LIMIT && (
-              <p className="hint">
-                More than {SCATTER_SERIES_LIMIT} series on a scatter plot are hard to tell apart; use the table view
-                or split into another panel.
-              </p>
-            )}
-          </fieldset>
+                  {(subtypesFor(s.activity_type).length > 1 || s.activity_subtype) && (
+                    <select
+                      aria-label={`Series ${i + 1} subtype`}
+                      title={STANDARD_SUBTYPE_HINT}
+                      value={s.activity_subtype ?? ''}
+                      onChange={(e) => setSeries(i, { activity_subtype: (e.target.value || null) as SeriesConfig['activity_subtype'] })}
+                    >
+                      <option value="">Any subtype</option>
+                      {s.activity_subtype && !subtypesFor(s.activity_type).includes(s.activity_subtype) && (
+                        <option value={s.activity_subtype}>{subtypeLabel(s.activity_subtype)}</option>
+                      )}
+                      {subtypesFor(s.activity_type).map((t) => <option key={t} value={t}>{subtypeLabel(t)}</option>)}
+                    </select>
+                  )}
+                  <DistancePicker
+                    value={s.distance_m ?? null}
+                    units={settings.units}
+                    tolerance={settings.distance_tolerance}
+                    onChange={(distance_m) => setSeries(i, { distance_m })}
+                  />
+                  {p.series.length > 1 && (
+                    <button type="button" className="link" onClick={() => set({ series: p.series.filter((_, j) => j !== i) })}>
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+              {p.series.length < PALETTE_SIZE && (
+                <button type="button" className="secondary" onClick={addSeries}>Add series</button>
+              )}
+              {split && (
+                <button type="button" className="secondary" onClick={() => set({ series: split })}
+                  title="Replace the series with one per subtype, e.g. trail runs and standard runs as separate lines">
+                  Split by subtype
+                </button>
+              )}
+              {p.chart === 'scatter' && p.series.length > SCATTER_SERIES_LIMIT && (
+                <p className="hint">
+                  More than {SCATTER_SERIES_LIMIT} series on a scatter plot are hard to tell apart; use the table view
+                  or split into another panel.
+                </p>
+              )}
+            </fieldset>
+          )}
 
           <fieldset className="row">
             <legend>Right axis (optional)</legend>
@@ -349,10 +367,11 @@ function Swatches({ colors, label, value, onChange }: {
   )
 }
 
-function AxisFields({ title, axis, fields, total, showAgg, onLevel, onChange }: {
+function AxisFields({ title, axis, fields, levels, total, showAgg, onLevel, onChange }: {
   title: string
   axis: AxisSpec
   fields: FieldInfo[]
+  levels: Level[]
   total: number
   showAgg: boolean
   onLevel: (l: Level) => void
@@ -362,7 +381,7 @@ function AxisFields({ title, axis, fields, total, showAgg, onLevel, onChange }: 
     <fieldset className="row">
       <legend>{title}</legend>
       <select aria-label={`${title} data`} value={axis.level} onChange={(e) => onLevel(e.target.value as Level)}>
-        {(Object.keys(LEVEL_LABELS) as Level[]).map((l) => <option key={l} value={l}>{LEVEL_LABELS[l]}</option>)}
+        {levels.map((l) => <option key={l} value={l}>{LEVEL_LABELS[l]}</option>)}
       </select>
       <select aria-label={`${title} field`} value={axis.field} onChange={(e) => onChange({ ...axis, field: e.target.value })}>
         {fields.map((f) => (
